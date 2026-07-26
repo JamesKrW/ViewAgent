@@ -164,6 +164,7 @@ class LFWrapper:
             return False
         if self._state == ModuleState.LAUNCHED:
             _patch_text_model_type(model_dir / "config.json")
+            _patch_image_processor_fast(model_dir)
             _drop_llamafactory_readme(model_dir)
             self._state = ModuleState.DONE
         return True
@@ -216,6 +217,7 @@ class LFWrapper:
 
         if self._state == ModuleState.LAUNCHED:
             _patch_text_model_type(model_dir / "config.json")
+            _patch_image_processor_fast(model_dir)
             _drop_llamafactory_readme(model_dir)
             self._state = ModuleState.DONE
             self._log("LoRA adapter merged successfully")
@@ -338,6 +340,29 @@ def _patch_text_model_type(config_path: Path) -> None:
             logger.info("[SFT] Patched text_config.model_type: qwen2_5_vl_text -> qwen2_5_vl")
     except Exception as e:
         logger.warning("[SFT] Failed to patch model config: %s", e)
+
+
+def _patch_image_processor_fast(model_dir: Path) -> None:
+    """Ensure the saved processor uses the *fast* image processor (InternVL).
+
+    LLaMA-Factory saves the slow ``GotOcr2ImageProcessor``, but vLLM's InternVL
+    rollout requires ``GotOcr2ImageProcessorFast`` (otherwise ``init_device``
+    raises ``GotOcr2ImageProcessorFast is expected but got GotOcr2ImageProcessor``).
+    Image preprocessing params are unchanged by SFT, so flipping the type is safe.
+    """
+    pp = model_dir / "preprocessor_config.json"
+    try:
+        if pp.is_file():
+            cfg = json.loads(pp.read_text())
+            if cfg.get("image_processor_type") == "GotOcr2ImageProcessor":
+                cfg["image_processor_type"] = "GotOcr2ImageProcessorFast"
+                pp.write_text(json.dumps(cfg, indent=2) + "\n")
+                logger.info(
+                    "[SFT] Patched image_processor_type: GotOcr2ImageProcessor -> "
+                    "GotOcr2ImageProcessorFast in %s", pp,
+                )
+    except Exception as e:
+        logger.warning("[SFT] Failed to patch preprocessor_config: %s", e)
 
 
 def _drop_llamafactory_readme(model_dir: Path) -> None:
