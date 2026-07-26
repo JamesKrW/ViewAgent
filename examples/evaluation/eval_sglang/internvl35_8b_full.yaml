@@ -1,0 +1,33 @@
+# Full base-model eval for InternVL3.5-8B-HF on all 3 tasks (P2V/V2P/IVP),
+# 530 episodes each, via the vLLM backend. IVP uses the remote render service
+# (client_url.txt) so run this under with-proxy.
+defaults:
+  - ../eval_default
+
+fileroot: ${oc.env:VIEWSUITE_ROOT}
+
+default_chat_config:
+  temperature: 0.0
+  max_tokens: 2048
+  top_p: 0.95
+
+experiment:
+  dump_dir: ${fileroot}/rollouts/internvl35_8b
+  default_max_turns: 10
+
+run:
+  backend: "vllm"
+  base_seed: 0
+  max_concurrent_jobs: 32
+  resume: skip_completed
+  live_summary: true
+
+backends:
+  vllm:
+    base_url: "http://127.0.0.1:30011/v1"
+    api_key: "EMPTY"
+    model: "OpenGVLab/InternVL3_5-8B-HF"
+    max_concurrency: 32
+    max_retries: 6
+    min_backoff: 0.5
+    max_backoff: 8.0

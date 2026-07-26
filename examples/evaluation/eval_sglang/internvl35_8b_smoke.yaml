@@ -1,0 +1,45 @@
+# Tiny smoke config: P2V only, 8 envs — validate the eval harness + vLLM
+# backend + InternVL3.5-8B-HF end to end (no render service needed for P2V).
+defaults:
+  - ../eval_default
+
+fileroot: ${oc.env:VIEWSUITE_ROOT}
+
+default_chat_config:
+  temperature: 0.0
+  max_tokens: 2048
+  top_p: 0.95
+
+envs:
+  - name: Path2View
+    n_envs: 8
+    tag_id: path_to_view
+    seed: [1, 8, 1]
+    split: test
+    max_turns: 1
+    config:
+      jsonl_path: ${fileroot}/data/viewsuite_15k/path_to_view_test.jsonl
+      image_size: [512, 512]
+      format: eval_mode
+      example_count: 0
+
+experiment:
+  dump_dir: ${fileroot}/rollouts/internvl35_8b_smoke
+  default_max_turns: 1
+
+run:
+  backend: "vllm"
+  base_seed: 0
+  max_concurrent_jobs: 8
+  resume: skip_completed
+  live_summary: true
+
+backends:
+  vllm:
+    base_url: "http://127.0.0.1:30011/v1"
+    api_key: "EMPTY"
+    model: "OpenGVLab/InternVL3_5-8B-HF"
+    max_concurrency: 8
+    max_retries: 6
+    min_backoff: 0.5
+    max_backoff: 8.0
