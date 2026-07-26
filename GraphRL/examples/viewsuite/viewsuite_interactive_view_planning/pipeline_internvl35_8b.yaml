@@ -1,0 +1,222 @@
+# =============================================================================
+# ViewSuite Interactive View Planning — GraphRL Pipeline Config (InternVL3.5-8B)
+# =============================================================================
+# Mirrors pipeline_qwen3vl8b.yaml exactly, except:
+#   - initial_model_path swapped to OpenGVLab/InternVL3_5-8B-HF  (HF-native format;
+#     the custom-code OpenGVLab/InternVL3_5-8B is NOT usable — LLaMA-Factory and
+#     transformers/verl require the *-HF conversion.)
+#   - SFT template swapped to intern_vl (LLaMA-Factory InternVL template)
+#   - experiment_dir / experiment_name updated
+#
+# Notes:
+#   - RL (verl) needs the InternVL backport (PR #6578 adapted for verl 0.6.1 +
+#     sglang rollout): 1D-RoPE position ids, <IMG_CONTEXT> handling, etc.
+#   - Requires transformers>=4.52.1 (env pins 4.57.1) and an sglang build that
+#     serves InternVL3.5-HF (env pins sglang 0.5.3.post3).
+#
+# Usage:
+#   bash run_internvl35_8b.sh
+#   bash run_internvl35_8b.sh experiment_dir=/my/exp iterations=5
+
+hydra:
+  job:
+    chdir: false
+
+project_name: viewsuite
+experiment_name: viewsuite_interactive_view_planning_internvl35_8b
+experiment_dir: exps/${project_name}/${experiment_name}
+initial_model_path: OpenGVLab/InternVL3_5-8B-HF
+iterations: 3
+
+general_overrides:
+  rl:
+    training_steps: 600
+    vagen_dir: VAGEN
+    # train_files / val_files are injected by run_internvl35_8b.sh (need absolute paths)
+    hydra_overrides:
+      data:
+        max_prompt_length: 4000
+        max_response_length: 10000
+        train_batch_size: 128
+        train_files: null
+        val_files: null
+        eval_files: null
+      algorithm:
+        adv_estimator: gae
+        kl_ctrl:
+          kl_coef: 0.0
+      actor_rollout_ref:
+        model:
+          use_remove_padding: true
+          use_fused_kernels: false   # InternVL: fused-kernel forward_with_torch_backend requires return_dict (unsupported for the value-head forward)
+        actor:
+          ppo_micro_batch_size_per_gpu: 2
+          ppo_mini_batch_size: 128
+          checkpoint:
+            save_contents: [model, hf_model, optimizer, extra]
+          fsdp_config:
+            param_offload: true
+            optimizer_offload: true
+        rollout:
+          name: vllm                  # InternVL3.5-HF: vLLM has native support; sglang 0.5.3.post3 does not
+          log_prob_micro_batch_size_per_gpu: 2
+          tensor_model_parallel_size: 1
+          mode: async
+          max_num_batched_tokens: 32768
+          gpu_memory_utilization: 0.6
+          enforce_eager: true          # required for InternVL under vLLM
+          enable_prefix_caching: false # avoid mm_hash dedup of repeated IVP views (masked_scatter mismatch)
+          disable_log_stats: false
+          agent:
+            agent_loop_config_path: vagen/configs/agent.yaml
+          engine_kwargs:
+            vllm:
+              # Image-only. Disable video (vLLM interns1 has a 448/384 video-profiling bug).
+              # Do NOT also set rollout.limit_images — verl overwrites this dict with {image:N} only.
+              limit_mm_per_prompt: {image: 16, video: 0}
+              # IVP revisits views -> duplicate images per prompt. vLLM's mm cache
+              # dedups identical images (1 feature set) while the prompt keeps N
+              # placeholder sets -> masked_scatter mismatch. Disable the cache.
+              disable_mm_preprocessor_cache: true
+          n: 1
+        ref:
+          log_prob_micro_batch_size_per_gpu: 2
+          fsdp_config:
+            param_offload: true
+      critic:
+        enable: true
+        model:
+          use_remove_padding: true
+          fsdp_config:
+            param_offload: true
+            optimizer_offload: true
+        ppo_micro_batch_size_per_gpu: 2
+      trainer:
+        n_gpus_per_node: 8
+        save_freq: 20
+        test_freq: 20
+        max_actor_ckpt_to_keep: 1
+        max_critic_ckpt_to_keep: 1
+        nnodes: 1
+        skip_special_tokens_val: true
+        log_val_generations: 32
+        # project_name / experiment_name / logger injected dynamically by command_builder
+
+  traj_to_sft:
+    module: graphrl.envs.viewsuite.viewsuite_interactive_view_planning.InteractiveViewPlanningTrajToSFT
+    viewsuite_15k_dir: ${oc.env:VIEWSUITE_ROOT}/data/viewsuite_15k
+    graph_builder:
+      num_workers: 4
+      filter:
+        void_threshold: 0.7
+        std_threshold: 10.0
+    generators:
+      - action_gen
+      - path_to_view
+      - multi_turn_action_gen
+      - multi_turn_action_gen_mcq
+      - multi_turn_action_gen_mix
+      - view_difference
+      - view_difference_mcq
+    action_gen:
+      min_path_len: 1
+      max_path_len: 3
+      sample_per_scene: 15
+      balanced_sampling: true
+    path_to_view:
+      min_path_len: 1
+      max_path_len: 3
+      sample_per_scene: 15
+      balanced_sampling: true
+    multi_turn_action_gen:
+      min_path_len: 3
+      max_path_len: 5
+      sample_per_scene: 20
+      oversample: 10
+      single_mix_multi_ratio: "6:2:2"
+      balanced_sampling: true
+    multi_turn_action_gen_mcq:
+      min_path_len: 1
+      max_path_len: 3
+      sample_per_scene: 15
+      balanced_sampling: false
+    multi_turn_action_gen_mix:
+      min_path_len: 3
+      max_path_len: 5
+      sample_per_scene: 20
+      mcq_prob: 0.5
+      balanced_sampling: true
+    view_difference:
+      min_path_len: 2
+      max_path_len: 5
+      sample_per_scene: 15
+      balanced_sampling: true
+    view_difference_mcq:
+      min_path_len: 2
+      max_path_len: 5
+      sample_per_scene: 15
+      balanced_sampling: true
+    seed: 42
+
+  sft:
+    n_gpus: 8
+    hydra_overrides:
+      stage: sft
+      do_train: true
+      finetuning_type: full
+      dataset: multi_turn_action_gen,view_difference,view_difference_mcq
+      template: intern_vl          # multimodal InternVL template (LLaMA-Factory)
+      cutoff_len: 16384           # multi_turn_action_gen can be long with images
+      preprocessing_num_workers: 16
+      per_device_train_batch_size: 2
+      gradient_accumulation_steps: 2
+      learning_rate: 1.0e-5
+      num_train_epochs: 4.0
+      weight_decay: 0.01
+      lr_scheduler_type: cosine
+      warmup_ratio: 0.1
+      bf16: true
+      flash_attn: fa2                  # Flash Attention 2 for long sequences
+      logging_steps: 10
+      overwrite_output_dir: true
+      # --- Validation ---
+      val_size: 0.2                    # 20% of training data as validation
+      eval_strategy: epoch             # evaluate at each epoch boundary
+      per_device_eval_batch_size: 2
+      load_best_model_at_end: true     # keep the checkpoint with lowest eval_loss
+      metric_for_best_model: eval_loss
+      greater_is_better: false
+      save_strategy: epoch             # must match eval_strategy for load_best_model_at_end
+      save_total_limit: 1              # keep only the best checkpoint
+      trust_remote_code: true
+      deepspeed: ds_z2_config.json
+      use_fast_tokenizer: false
+
+iteration_overrides:
+  iter0:
+    rl:
+      training_steps: 61
+    sft:
+      hydra_overrides:
+        num_train_epochs: 3.0
+  iter1:
+    rl:
+      training_steps: 61
+    sft:
+      hydra_overrides:
+        num_train_epochs: 3.0
+  iter2:
+    rl:
+      training_steps: 61
+    sft:
+      hydra_overrides:
+        num_train_epochs: 3.0
+  iter3:
+    rl:
+      training_steps: 1001
+      timeout: 259200  # 72h — long-horizon iter, default 24h is not enough
+      hydra_overrides:
+        huggingface_hub:
+          hf_save_freq: 100
+          repo_id: null
+          private: false

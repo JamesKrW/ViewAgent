@@ -619,6 +619,13 @@ def patch_valuehead_model(model) -> None:
 def load_valuehead_model(local_path, torch_dtype, model_config, trust_remote_code):
     from transformers import AutoModelForCausalLM, AutoModelForTokenClassification, AutoModelForVision2Seq
 
+    # transformers >= 4.54 registers newer VLMs (e.g. InternVL) under
+    # AutoModelForImageTextToText, not AutoModelForVision2Seq.
+    try:
+        from transformers import AutoModelForImageTextToText
+    except ImportError:
+        AutoModelForImageTextToText = None
+
     try:
         model = AutoModelForTokenClassification.from_pretrained(
             pretrained_model_name_or_path=local_path,
@@ -640,6 +647,8 @@ def load_valuehead_model(local_path, torch_dtype, model_config, trust_remote_cod
 
     if type(model_config) in AutoModelForVision2Seq._model_mapping.keys():
         module_class = AutoModelForVision2Seq
+    elif AutoModelForImageTextToText is not None and type(model_config) in AutoModelForImageTextToText._model_mapping.keys():
+        module_class = AutoModelForImageTextToText
     else:
         module_class = AutoModelForCausalLM
     ori_model = module_class.from_pretrained(

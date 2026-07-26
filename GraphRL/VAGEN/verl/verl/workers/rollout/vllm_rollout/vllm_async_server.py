@@ -284,7 +284,13 @@ class vLLMHttpServerBase:
                     server_args.append(f"--{k}")
             else:
                 server_args.append(f"--{k}")
-                server_args.append(str(v))
+                # dict/list valued args (e.g. limit_mm_per_prompt) must be JSON
+                # (double quotes) for vLLM's CLI json.loads — str() gives Python
+                # repr with single quotes and fails to parse.
+                if isinstance(v, (dict, list)):
+                    server_args.append(json.dumps(v))
+                else:
+                    server_args.append(str(v))
 
         if self.replica_rank == 0:
             pprint(server_args)
@@ -576,7 +582,19 @@ def _qwen2_5_vl_dedup_image_tokens(prompt_ids: list[int], processor):
     <|vision_start|><|image_pad|><|vision_end|>
     ```
     """
-    if processor is not None and "Qwen2VLImageProcessor" in processor.image_processor.__class__.__name__:
+    # Same collapse is needed for InternVL: the agent pre-expands <IMG_CONTEXT>
+    # (256 per tile) but vLLM re-expands a single image token per image from
+    # image_data, so keep one image token and let vLLM replicate it. Without this
+    # the pre-expanded tokens conflict with vLLM's expansion -> masked_scatter
+    # size mismatch (totalElements > srcSize) in the InternVL forward.
+    _ip_cls = processor.image_processor.__class__.__name__ if processor is not None else ""
+    _p_cls = processor.__class__.__name__ if processor is not None else ""
+    _needs_dedup = processor is not None and (
+        "Qwen2VLImageProcessor" in _ip_cls
+        or _p_cls == "InternVLProcessor"
+        or "GotOcr2ImageProcessor" in _ip_cls
+    )
+    if _needs_dedup:
         prompt_ids = np.array(prompt_ids)
 
         # Create a mask where True indicates elements to keep
