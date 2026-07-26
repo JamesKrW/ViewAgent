@@ -7,17 +7,15 @@
 #     (OpenGVLab/InternVL3_5-8B-HF + intern_vl SFT template)
 #
 # Requirements (installed by scripts/install.sh):
-#   transformers==4.57.1      (>=4.52.1 needed for InternVL3.5-HF)
-#   sglang[all]==0.5.3.post3  (must serve InternVL3.5-HF for rollout)
-#   verl 0.6.1 + InternVL backport (PR #6578, adapted for sglang rollout)
+#   transformers==4.57.1  (>=4.52.1 for InternVL3.5-HF)
+#   vllm==0.11.0          (rollout engine; sglang 0.5.3 lacks native InternVL-HF)
+#   verl 0.6.1 + InternVL fixes (see AGENT.md)
 #
-# The render service (client_url.txt) is reached via with-proxy on this box,
-# so launch the whole thing under `with-proxy`:
-#   with-proxy bash run_internvl35_8b.sh
-#
-# Usage:
-#   with-proxy bash run_internvl35_8b.sh
-#   with-proxy bash run_internvl35_8b.sh iterations=5
+# Rollout uses vLLM (rollout.name=vllm). The render service (client_url.txt) is
+# external, reached via the forward proxy — this script sets http_proxy inline,
+# so just run it directly (no `with-proxy` wrapper needed):
+#   bash run_internvl35_8b.sh
+#   bash run_internvl35_8b.sh iterations=5
 #
 # experiment_dir is computed by pipeline_internvl35_8b.yaml as
 #   exps/viewsuite/viewsuite_interactive_view_planning_internvl35_8b/
@@ -35,9 +33,19 @@ LOG_FILE="${EXPERIMENT_DIR}/pipeline_$(date +%Y%m%d_%H%M%S).log"
 echo "Logging to: ${LOG_FILE}"
 
 # Meta W&B creds from repo .env (WANDB_API_KEY / WANDB_BASE_URL=https://meta.wandb.io / WANDB_ENTITY).
-# meta.wandb.io is internal -> keep it off the forward proxy so it isn't 403'd under with-proxy.
 [ -f "${REPO_ROOT}/.env" ] && { set -a; . "${REPO_ROOT}/.env"; set +a; }
-export no_proxy="${no_proxy:-},meta.wandb.io,.wandb.io"; export NO_PROXY="${no_proxy}"
+
+# Forward proxy inline (the render service = external IPs; needs the proxy). Internal
+# hosts incl. meta.wandb.io stay off-proxy. Avoids relying on the `with-proxy` wrapper.
+export http_proxy=http://fwdproxy:8080 https_proxy=http://fwdproxy:8080
+export HTTP_PROXY=http://fwdproxy:8080 HTTPS_PROXY=http://fwdproxy:8080
+export no_proxy=".fbcdn.net,.facebook.com,.fbinfra.net,.thefacebook.com,.tfbnw.net,.fb.com,.fburl.com,.facebook.net,.sb.fbsbx.com,meta.wandb.io,.wandb.io,localhost,127.0.0.1,::1"
+export NO_PROXY="$no_proxy"
+
+# InternVL: model cached; LLaMA-Factory trl<=0.24 check skipped (verl needs trl 0.26.2).
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+export DISABLE_VERSION_CHECK=1
+export VLLM_USE_V1=1
 
 if [ -z "${WANDB_API_KEY:-}" ]; then
     export WANDB_MODE=offline
