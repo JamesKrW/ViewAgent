@@ -95,8 +95,18 @@ def _pose_to_text(pose: Dict[str, float]) -> str:
 
 
 def _count_images(content: str) -> int:
-    """Count <image> placeholders in a message."""
-    return content.count(_IMAGE_PLACEHOLDER)
+    """Count image placeholders in a message.
+
+    Qwen/eval-logging text uses ``<image>``. InternVL's dumped rollout text
+    instead has one ``<img>...</img>`` block per image (with ``<IMG_CONTEXT>``
+    inside), so fall back to counting ``<img>`` open-tags when no ``<image>``
+    placeholder is present — otherwise observation images never get attached to
+    graph nodes and the whole view graph comes out empty.
+    """
+    n = content.count(_IMAGE_PLACEHOLDER)
+    if n == 0:
+        n = content.count("<img>")
+    return n
 
 
 def _action_count(obs_str: str) -> int:

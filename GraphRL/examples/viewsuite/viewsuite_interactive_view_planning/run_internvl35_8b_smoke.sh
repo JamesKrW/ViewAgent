@@ -53,7 +53,6 @@ python -m graphrl.main \
     general_overrides.rl.hydra_overrides.trainer.nnodes=1 \
     general_overrides.rl.hydra_overrides.trainer.save_freq=10 \
     general_overrides.rl.hydra_overrides.trainer.test_freq=100000 \
-    +general_overrides.rl.hydra_overrides.trainer.log_image.enable=false \
     general_overrides.sft.n_gpus="${SFT_N_GPUS}" \
     general_overrides.sft.hydra_overrides.num_train_epochs=1.0 \
     general_overrides.sft.hydra_overrides.val_size=0.1 \
