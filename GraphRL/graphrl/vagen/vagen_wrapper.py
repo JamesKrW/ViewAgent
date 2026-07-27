@@ -130,6 +130,12 @@ class VagenWrapper:
     def is_done(self) -> bool:
         model_path = Path(self.output_paths["model"])
         if not _is_model_dir_complete(model_path):
+            # Fail fast: if the RL subprocess has exited (crashed) without
+            # producing a complete rl_model, mark FAILED so the controller
+            # raises instead of polling until the (72h) watchdog timeout.
+            if self._process is not None and self._process.poll() is not None:
+                if self._process.returncode != 0:
+                    self._state = ModuleState.FAILED
             return False
         if self._process and self._process.poll() is None:
             return False

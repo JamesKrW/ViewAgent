@@ -65,6 +65,5 @@ python -m graphrl.main \
     iteration_overrides.iter1.rl.training_steps=61 \
     iteration_overrides.iter2.rl.training_steps=61 \
     +iteration_overrides.iter3.rl.hydra_overrides.data.train_files="${SCRIPT_DIR}/train.yaml" \
-    +iteration_overrides.iter3.rl.hydra_overrides.huggingface_hub.repo_id=viewsuite_interactive_view_planning_internvl35_8b \
     +iteration_overrides.iter3.rl.hydra_overrides.trainer.log_image.enable=false \
     "$@" 2>&1 | tee "${LOG_FILE}"
