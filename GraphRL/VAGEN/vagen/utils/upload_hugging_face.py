@@ -225,7 +225,17 @@ class HFUploadManager:
         print(f"[HFUpload] Started async best-val upload (step {global_steps}) to {path_in_repo}")
 
     def flush(self):
-        """Block until any pending upload finishes."""
+        """Block until any pending upload finishes.
+
+        Non-fatal: an HF upload failure (offline mode, missing/invalid token,
+        network, repo permissions) must NEVER crash training. Previously an
+        actor death here (e.g. create_repo under HF_HUB_OFFLINE=1) propagated
+        and killed the whole RL run.
+        """
         if self._pending_future is not None:
-            ray.get(self._pending_future)
-            self._pending_future = None
+            try:
+                ray.get(self._pending_future)
+            except Exception as e:
+                print(f"[HFUpload] WARNING: upload failed (non-fatal), skipping: {e!r}")
+            finally:
+                self._pending_future = None
