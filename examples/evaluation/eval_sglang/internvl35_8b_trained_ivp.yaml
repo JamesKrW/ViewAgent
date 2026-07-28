@@ -1,0 +1,53 @@
+# IVP-only eval for the TRAINED InternVL3.5-8B (iter_002/sft/sft_model = full
+# 3 GraphRL iterations of RL+SFT). Mirrors internvl35_8b_full.yaml's IVP env
+# exactly (530 episodes, same test set, same chat params) for an apples-to-apples
+# comparison against the base-model rollouts in rollouts/internvl35_8b.
+# Served + evaluated via vLLM DP8; IVP hits the remote render service (proxy).
+defaults:
+  - ../eval_default
+
+fileroot: ${oc.env:VIEWSUITE_ROOT}
+
+default_chat_config:
+  temperature: 0.0
+  max_tokens: 2048
+  top_p: 0.95
+
+# Only the IVP env (override the inherited P2V/V2P/IVP list).
+envs:
+  - name: InteractiveViewPlanning
+    n_envs: 530
+    tag_id: interactive_view_planning
+    seed: [1, 530, 1]
+    split: test
+    max_turns: 10
+    config:
+      jsonl_path: ${fileroot}/data/viewsuite_15k/interactive_view_planning_test_filter.jsonl
+      max_turns: 10
+      render_backend: client
+      client_url_file_path: ${fileroot}/client_url.txt
+      image_size: [512, 512]
+      format: eval_mode
+      use_example_in_sys_prompt: false
+      action_only_mode: true
+
+experiment:
+  dump_dir: ${fileroot}/rollouts/internvl35_8b_trained
+  default_max_turns: 10
+
+run:
+  backend: "vllm"
+  base_seed: 0
+  max_concurrent_jobs: 96
+  resume: skip_completed
+  live_summary: true
+
+backends:
+  vllm:
+    base_url: "http://127.0.0.1:30011/v1"
+    api_key: "EMPTY"
+    model: "viewagent-internvl35-8b-trained"
+    max_concurrency: 96
+    max_retries: 6
+    min_backoff: 0.5
+    max_backoff: 8.0
