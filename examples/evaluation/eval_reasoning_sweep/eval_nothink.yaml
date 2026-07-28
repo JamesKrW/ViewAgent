@@ -1,0 +1,87 @@
+# ── Reasoning-effort sweep · NOTHINK base ────────────────────────────
+# Mode "nothink": tuned no-reasoning PROMPT (format: nothink, lenient parse)
+# + model-side reasoning DISABLED at the API level (reasoning.enabled=false).
+#
+# Reduced N: 150 samples/env, drawn deterministically from the full 530-sample
+# test split (seed [1,530,1], base_seed 0 => rng.sample(range(1,531), 150)).
+# The same directive is used by every mode/model, so the subset is IDENTICAL
+# across nothink/high => a perfectly controlled comparison.
+#
+# Per-model files inherit this via `defaults: [eval_nothink]` and only set
+# the OpenRouter model id + dump_dir.
+# ─────────────────────────────────────────────────────────────────────
+
+fileroot: ${oc.env:VIEWSUITE_ROOT}
+
+default_chat_config:
+  temperature: 0.0
+  max_tokens: 4096          # no reasoning tokens needed; answer is tiny
+  top_p: 0.95
+  # NOTE: extra_body.reasoning is set PER-MODEL in the generated nothink_*.yaml
+  # files, not here. Most models use {enabled: false} (true zero reasoning),
+  # but Gemini 3.1 Pro mandates reasoning and rejects enabled:false, so it uses
+  # {effort: low} (its minimum). Putting it here would deep-merge into a
+  # conflicting {enabled:false, effort:low} for Gemini.
+
+envs:
+
+  - name: Path2View
+    n_envs: 530
+    tag_id: path_to_view
+    seed: [1,530,1]
+    split: test
+    max_turns: 1
+    config:
+      jsonl_path: ${fileroot}/data/viewsuite_15k/path_to_view_test_filter.jsonl
+      image_size: [512,512]
+      format: nothink
+      example_count: 0
+
+  - name: View2Path
+    n_envs: 530
+    tag_id: view_to_path
+    seed: [1,530,1]
+    split: test
+    max_turns: 1
+    config:
+      jsonl_path: ${fileroot}/data/viewsuite_15k/view_to_path_test_filter.jsonl
+      image_size: [512,512]
+      format: nothink
+      example_count: 0
+
+  - name: InteractiveViewPlanning
+    n_envs: 530
+    tag_id: interactive_view_planning
+    seed: [1,530,1]
+    split: test
+    max_turns: 10
+    config:
+      jsonl_path: ${fileroot}/data/viewsuite_15k/interactive_view_planning_test_filter.jsonl
+      max_turns: 10
+      render_backend: client
+      client_url_file_path: ${fileroot}/client_url.txt
+      image_size: [512,512]
+      format: nothink
+      use_example_in_sys_prompt: false
+      action_only_mode: true
+
+experiment:
+  dump_dir: ${fileroot}/rollouts/reasoning_sweep/nothink/default
+  default_max_turns: 1
+
+run:
+  backend: "openai"
+  base_seed: 0
+  max_concurrent_jobs: 12
+  resume: skip_completed
+  live_summary: true
+
+backends:
+  openai:
+    api_key: ${oc.env:OPENROUTER_API_KEY}
+    base_url: "https://openrouter.ai/api/v1"
+    model: "openai/gpt-4o"
+    max_concurrency: 12
+    max_retries: 6
+    min_backoff: 0.5
+    max_backoff: 8.0

@@ -38,3 +38,8 @@ MANIFEST
 /rollouts*/
 /exps/
 /tests/
+.env.reasoning
+
+# reasoning-effort sweep: machine-local symlink + run logs
+/data
+examples/evaluation/eval_reasoning_sweep/*.log
