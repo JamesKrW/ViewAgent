@@ -16,11 +16,27 @@ class View2Path(GymProxyNoTool):
         """
         obs, info = await super().reset(seed)
 
-        # Build the instruction that was originally in system prompt
-        instruction = (
-            "You are given a question and a set of images. You need to answer the question based on the images.\n"
-            "Given x be one of the choices A|B|C|D, your answer should be in the format of: <think>...</think><action>answer(x)|</action>"
+        # Build the instruction that was originally in the system prompt.
+        # V2P historically hardcoded a think-style format line (ignoring
+        # self.format). We keep that byte-for-byte for every existing format so
+        # the effort-enabled baselines stay comparable to the published table,
+        # and only swap in the tuned no-reasoning instruction for "nothink".
+        base = (
+            "You are given a question and a set of images. "
+            "You need to answer the question based on the images.\n"
         )
+        if self.format == "nothink":
+            from view_suite.envs.utils.parse_utils import get_format_instruction
+            instruction = base + get_format_instruction(
+                "nothink",
+                action_example="answer(x)|",
+                action_description="where x is one of the choices A, B, C, or D.",
+            )
+        else:
+            instruction = (
+                base
+                + "Given x be one of the choices A|B|C|D, your answer should be in the format of: <think>...</think><action>answer(x)|</action>"
+            )
 
         # Get examples
         example_prompt = self._build_example_prompt(self.example_count)

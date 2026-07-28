@@ -72,6 +72,19 @@ _FORMAT_TEMPLATES: Dict[str, str] = {
         "<action>{action_example}</action>\n"
         "{action_description}"
     ),
+    # Tuned no-think prompt used for the reasoning-effort sweep. Unlike the
+    # strict "no_think" above (whose parser requires the reply to be *exactly*
+    # <action>...</action>), "nothink" is paired with a lenient parser so we
+    # measure the model's answer quality rather than its tag-formatting
+    # discipline. The wording strongly discourages any chain-of-thought so the
+    # comparison against the effort-enabled modes is meaningful.
+    "nothink": (
+        "Answer directly. Do NOT think, reason, explain, or output anything "
+        "except the answer itself. Respond with ONLY the action, in exactly "
+        "this format and nothing else:\n"
+        "<action>{action_example}</action>\n"
+        "{action_description}"
+    ),
 }
 
 
@@ -166,6 +179,23 @@ def parse_free_think_lenient(response: str) -> Dict[str, Any]:
         "think": "",
         "actions_blob": m.group("action").strip(),
     }
+
+
+@FormatRegistry.register("nothink")
+def parse_nothink(response: str) -> Dict[str, Any]:
+    """
+    Tuned no-think format: the *prompt* forbids reasoning, but parsing is
+    lenient — we only require an ``<action>...</action>`` block to appear
+    somewhere in the reply (same robustness as ``eval_mode``). This isolates
+    the effect of disabling reasoning without penalising a model for emitting
+    a stray character around the action tag.
+
+    Returns ``{"ok": bool, "think": str, "actions_blob": str}``
+    """
+    m = _LENIENT_ACTION_RE.search(response)
+    if not m:
+        return {"ok": False, "think": "", "actions_blob": response.strip()}
+    return {"ok": True, "think": "", "actions_blob": m.group("action").strip()}
 
 
 @FormatRegistry.register("no_think")

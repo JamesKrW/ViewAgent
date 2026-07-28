@@ -1,0 +1,86 @@
+# ── Reasoning-effort sweep · HIGH base ───────────────────────────────
+# Mode "high": SAME prompt as the published baseline (format: eval_mode,
+# reasoning optional + lenient parse) + model-side reasoning at HIGH effort
+# (reasoning.effort=high). This differs from the "medium" baseline (the
+# published table / eval_all_openrouter) ONLY in the effort level, so the
+# medium column can be reused without re-running it.
+#
+# max_tokens is raised to 32000 because high-effort reasoning tokens count
+# against the completion budget on most providers; 10000 (the medium default)
+# risks truncating the answer at high effort.
+#
+# Reduced N: identical 150-sample subset as eval_nothink (seed [1,530,1]).
+# ─────────────────────────────────────────────────────────────────────
+
+fileroot: ${oc.env:VIEWSUITE_ROOT}
+
+default_chat_config:
+  temperature: 0.0
+  max_tokens: 32000         # headroom for high-effort reasoning + answer
+  top_p: 0.95
+  extra_body:
+    reasoning:
+      effort: "high"
+
+envs:
+
+  - name: Path2View
+    n_envs: 530
+    tag_id: path_to_view
+    seed: [1,530,1]
+    split: test
+    max_turns: 1
+    config:
+      jsonl_path: ${fileroot}/data/viewsuite_15k/path_to_view_test_filter.jsonl
+      image_size: [512,512]
+      format: eval_mode
+      example_count: 0
+
+  - name: View2Path
+    n_envs: 530
+    tag_id: view_to_path
+    seed: [1,530,1]
+    split: test
+    max_turns: 1
+    config:
+      jsonl_path: ${fileroot}/data/viewsuite_15k/view_to_path_test_filter.jsonl
+      image_size: [512,512]
+      format: eval_mode
+      example_count: 0
+
+  - name: InteractiveViewPlanning
+    n_envs: 530
+    tag_id: interactive_view_planning
+    seed: [1,530,1]
+    split: test
+    max_turns: 10
+    config:
+      jsonl_path: ${fileroot}/data/viewsuite_15k/interactive_view_planning_test_filter.jsonl
+      max_turns: 10
+      render_backend: client
+      client_url_file_path: ${fileroot}/client_url.txt
+      image_size: [512,512]
+      format: eval_mode
+      use_example_in_sys_prompt: false
+      action_only_mode: true
+
+experiment:
+  dump_dir: ${fileroot}/rollouts/reasoning_sweep/high/default
+  default_max_turns: 1
+
+run:
+  backend: "openai"
+  base_seed: 0
+  max_concurrent_jobs: 12
+  resume: skip_completed
+  live_summary: true
+
+backends:
+  openai:
+    api_key: ${oc.env:OPENROUTER_API_KEY}
+    base_url: "https://openrouter.ai/api/v1"
+    model: "openai/gpt-4o"
+    max_concurrency: 12
+    max_retries: 6
+    min_backoff: 0.5
+    max_backoff: 8.0
