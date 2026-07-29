@@ -1,0 +1,24 @@
+envs:
+  - name: InteractiveViewPlanning
+    data_source: ae
+    seed: [0, 3419, 1]
+    n_envs: 3419
+    max_turns: 10
+    response_length_per_turn: 512
+    config:
+      jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/viewsuite_15k/interactive_view_planning_train_filter.jsonl
+      image_size: [512, 512]
+      format: eval_mode
+      use_example_in_sys_prompt: false
+      client_url_file_path: ${oc.env:VIEWSUITE_ROOT}/client_url.txt
+      render_backend: client
+      max_turns: 10
+      per_turn_format_reward: 0.01
+      format_reward: 0.0
+      give_answer_reward: 0.1
+      action_only_mode: true
+      allow_rotate: false
+      # Per-turn bonus when the model emits the reasoning format
+      # `<observation>...</observation> ... <action>...</action>`.
+      # 0 to disable. Only GymProxyTool reads this.
+      obs_format_bonus_reward: 0.01
