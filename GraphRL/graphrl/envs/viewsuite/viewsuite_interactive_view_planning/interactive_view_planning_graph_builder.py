@@ -472,14 +472,25 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
                 "[InteractiveViewPlanningGraphBuilder] Filtered %d low-quality nodes", removed,
             )
 
-        # Split multi-action edges and merge equivalent nodes
-        n_virt, n_merged = self._refine_graph(graph)
-        if n_virt:
+        # Split multi-action edges and merge equivalent nodes.
+        # Idea-1: if atomize is enabled, render intermediate views so the graph
+        # becomes 100% single-action (multi-action edges whose intermediates fail
+        # to render are dropped), instead of collapsing back to "a | b | c" edges.
+        atom_cfg = self.config.get("atomize", {}) or {}
+        if atom_cfg.get("enabled"):
+            from .utils.graph_atomize import atomize_graph
+            stats = atomize_graph(self, graph, images_dir, atom_cfg)
             logger.info(
-                "[InteractiveViewPlanningGraphBuilder] Refine: %d virtual nodes created, "
-                "%d nodes merged",
-                n_virt, n_merged,
+                "[InteractiveViewPlanningGraphBuilder] Atomize: %s", stats,
             )
+        else:
+            n_virt, n_merged = self._refine_graph(graph)
+            if n_virt:
+                logger.info(
+                    "[InteractiveViewPlanningGraphBuilder] Refine: %d virtual nodes created, "
+                    "%d nodes merged",
+                    n_virt, n_merged,
+                )
 
         # Remove redundant edges (Dijkstra-based)
         n_redundant = self._remove_redundant_edges(graph)
