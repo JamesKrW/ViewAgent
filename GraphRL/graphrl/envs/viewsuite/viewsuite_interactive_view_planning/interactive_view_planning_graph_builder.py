@@ -231,6 +231,20 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
             std_threshold (float, default 10.0): min image std deviation.
     """
 
+    def __init__(self, config):
+        super().__init__(config)
+        # Idea-5: coarser node-merge tolerance unlocks cross-trajectory merge.
+        # The agent moves on a 0.5m/30deg grid, but the default 1e-3 tolerance is
+        # ~exact-match, so float drift keeps grid-identical poses from different
+        # trajectories from ever merging -> the graph barely beats no-graph.
+        # Set the tolerance BELOW half a step (< 0.25m / < 15deg) so distinct
+        # ADJACENT grid cells never merge. Configurable via graph_builder.merge_tol.
+        mt = (config.get("merge_tol") or {})
+        if mt.get("position") is not None:
+            ViewSuiteNodeData.POSITION_TOL = float(mt["position"])
+        if mt.get("angle") is not None:
+            ViewSuiteNodeData.ANGLE_TOL = float(mt["angle"])
+
     # ── factory override ──────────────────────────────────────────────────────
 
     def _make_node_data(self, ndata: Dict[str, Any]) -> NodeData:
