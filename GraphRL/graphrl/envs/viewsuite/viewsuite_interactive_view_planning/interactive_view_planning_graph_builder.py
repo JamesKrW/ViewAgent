@@ -479,10 +479,24 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
         atom_cfg = self.config.get("atomize", {}) or {}
         if atom_cfg.get("enabled"):
             from .utils.graph_atomize import atomize_graph
-            stats = atomize_graph(self, graph, images_dir, atom_cfg)
-            logger.info(
-                "[InteractiveViewPlanningGraphBuilder] Atomize: %s", stats,
-            )
+            try:
+                stats = atomize_graph(self, graph, images_dir, atom_cfg)
+                logger.info(
+                    "[InteractiveViewPlanningGraphBuilder] Atomize: %s", stats,
+                )
+            except Exception as e:
+                # Fail-safe: never crash the pipeline. Still guarantee a
+                # single-action graph by pruning any multi-action edges.
+                logger.error(
+                    "[atomize] FAILED (%s) -> pruning multi-action edges as fallback",
+                    e, exc_info=True,
+                )
+                pruned = 0
+                for u, v, eid, data in list(graph._g.edges(data=True, keys=True)):
+                    if len([a for a in data["obs_str"].split("|") if a.strip()]) > 1:
+                        graph._g.remove_edge(u, v, key=eid)
+                        pruned += 1
+                logger.info("[atomize] fallback pruned %d multi-action edges", pruned)
         else:
             n_virt, n_merged = self._refine_graph(graph)
             if n_virt:
