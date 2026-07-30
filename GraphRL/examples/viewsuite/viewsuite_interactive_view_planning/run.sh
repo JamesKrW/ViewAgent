@@ -44,6 +44,8 @@ python -m graphrl.main \
     iteration_overrides.iter0.rl.training_steps=61 \
     iteration_overrides.iter1.rl.training_steps=61 \
     iteration_overrides.iter2.rl.training_steps=61 \
+    iteration_overrides.iter3.rl.training_steps=200 \
+    general_overrides.traj_to_sft.graph_builder.atomize.enabled=true \
     +iteration_overrides.iter3.rl.hydra_overrides.data.train_files="${SCRIPT_DIR}/train.yaml" \
     +iteration_overrides.iter3.rl.hydra_overrides.huggingface_hub.repo_id=viewsuite_interactive_view_planning \
     +iteration_overrides.iter3.rl.hydra_overrides.trainer.log_image.enable=false \

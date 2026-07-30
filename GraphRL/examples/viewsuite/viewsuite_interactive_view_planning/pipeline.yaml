@@ -93,6 +93,14 @@ general_overrides:
       filter:
         void_threshold: 0.7
         std_threshold: 10.0
+      atomize:                 # Idea-1: render intermediate views -> 100% single-action graph
+        enabled: false         # turn on via run.sh override
+        client_url: null       # null -> falls back to $VIEWSUITE_ROOT/client_url_2.txt
+        step_translation: 0.5
+        step_rotation: 30.0
+        size: 512
+        render_chunk: 32
+        max_scene_concurrency: 8
     generators:
       - action_gen
       - path_to_view
