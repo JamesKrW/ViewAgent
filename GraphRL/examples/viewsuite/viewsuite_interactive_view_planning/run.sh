@@ -34,6 +34,8 @@ fi
 python -m graphrl.main \
     --config-path="${SCRIPT_DIR}" \
     --config-name=pipeline \
+    project_name=viewsuite_graph_improve \
+    experiment_name=graph_atomize_ir5 \
     general_overrides.rl.hydra_overrides.data.train_files="${SCRIPT_DIR}/train_turn_format.yaml" \
     general_overrides.rl.hydra_overrides.data.val_files="${SCRIPT_DIR}/val.yaml" \
     iterations=4 \
