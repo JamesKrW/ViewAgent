@@ -94,6 +94,9 @@ general_overrides:
       filter:
         void_threshold: 0.7
         std_threshold: 10.0
+      merge_tol:               # Idea-5: node-merge tolerance (no-op cross-traj for nograph; kept for parity)
+        position: 0.001
+        angle: 0.001
       atomize:                 # Idea-1: render intermediate views -> 100% single-action graph
         enabled: false         # turn on via run.sh override
         client_url: null       # null -> falls back to $VIEWSUITE_ROOT/client_url_2.txt|client_url.txt
