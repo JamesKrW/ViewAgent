@@ -111,9 +111,9 @@ def _intermediate_chain(src_se3, actions, step_t, step_r):
 async def _render_scene(scene_id, c2w_list, cfg, K, size, chunk):
     """Render a list of c2w poses for one scene. Returns list of PIL.Image|None
     aligned with ``c2w_list`` (None on failure)."""
-    from view_suite.scannet.unified_renderer import UnifiedRenderer
+    from view_suite.scannet.unified_renderer import UnifiedRender
 
-    r = UnifiedRenderer(
+    r = UnifiedRender(
         render_backend="client",
         scannet_root=cfg.get("scannet_root"),
         client_url=cfg["client_url"],
