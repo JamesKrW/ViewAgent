@@ -142,7 +142,7 @@ class HRWRoutedAsyncUnifiedClient(AsyncUnifiedClient):
         meta: Optional[Dict[str, Any]] = None,
         images: Optional[List[Image.Image]] = None,
         *,
-        retries: int = 6,
+        retries: int = 4,
         backoff: float = 0.5,
     ) -> Tuple[Dict[str, Any], List[Image.Image]]:
         params = {"token": self.token} if self.token else None
@@ -215,7 +215,7 @@ class HRWRoutedAsyncUnifiedClient(AsyncUnifiedClient):
                     raise
 
                 # Preserve original backoff semantics
-                delay = min(float(backoff) * (2 ** attempt), 16.0) * (0.7 + 0.6 * random.random())
+                delay = min(float(backoff) * (2 ** attempt), 8.0) * (0.7 + 0.6 * random.random())
 
                 if self.log_retries:
                     next_attempt = attempt + 1
