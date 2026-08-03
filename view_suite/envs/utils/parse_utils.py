@@ -72,6 +72,20 @@ _FORMAT_TEMPLATES: Dict[str, str] = {
         "<action>{action_example}</action>\n"
         "{action_description}"
     ),
+    # Grounding format: the agent must ground its decision in what it SEES, and
+    # commit to a prediction of the next view. The <description> is goal-agnostic,
+    # so unlike <think> it stays valid after a hindsight goal relabel -> it can be
+    # cached on the graph node and reused as SFT supervision.
+    "grounding": (
+        "You need to describe what you currently see, reason, predict the next "
+        "view, then act. Respond in this format:\n"
+        "<description>[what is visible in the current view: objects, layout, "
+        "where you are facing]</description>"
+        "<think>[why this action moves you toward the target]</think>"
+        "<prediction>[what you expect to see after the action]</prediction>"
+        "<action>{action_example}</action>\n"
+        "{action_description}"
+    ),
 }
 
 
@@ -147,6 +161,40 @@ def parse_free_think(response: str) -> Dict[str, Any]:
     return {
         "ok": True,
         "think": m.group("think").strip(),
+        "actions_blob": m.group("action").strip(),
+    }
+
+
+_GROUNDING_RE = re.compile(
+    r'^\s*<description>(?P<description>[\s\S]*?)</description>\s*'
+    r'<think>(?P<think>[\s\S]*?)</think>\s*'
+    r'<prediction>(?P<prediction>[\s\S]*?)</prediction>\s*'
+    r'<action>(?P<action>[\s\S]*?)</action>\s*$',
+    re.IGNORECASE
+)
+
+
+@FormatRegistry.register("grounding")
+def parse_grounding(response: str) -> Dict[str, Any]:
+    """
+    Grounding format:
+    ``<description>...</description><think>...</think><prediction>...</prediction><action>...</action>``
+
+    ``description`` (current view) and ``prediction`` (next view) are goal-agnostic
+    visual grounding, so they survive hindsight goal relabeling and can be stored on
+    graph nodes / reused as SFT supervision. ``think`` is goal-dependent.
+
+    Returns ``{"ok", "description", "think", "prediction", "actions_blob"}``.
+    """
+    m = _GROUNDING_RE.fullmatch(response)
+    if not m:
+        return {"ok": False, "description": "", "think": "",
+                "prediction": "", "actions_blob": ""}
+    return {
+        "ok": True,
+        "description": m.group("description").strip(),
+        "think": m.group("think").strip(),
+        "prediction": m.group("prediction").strip(),
         "actions_blob": m.group("action").strip(),
     }
 
