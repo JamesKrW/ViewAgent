@@ -14,7 +14,8 @@
 #   general_overrides.traj_to_sft.graph_builder.atomize.enabled
 #
 # Usage:
-#   bash run_cheap3b.sh                       # merge_tol OFF (control)
+#   bash run_cheap3b.sh                       # grounding + merge_tol OFF (kitchen-sink v1)
+#   TRAIN_CFG=train_turn_format.yaml bash run_cheap3b.sh   # old free-form format (ablation)
 #   bash run_cheap3b.sh EXTRA_MERGE_TOL=on    # merge_tol 0.2/10
 # =============================================================================
 set -euo pipefail
@@ -31,7 +32,7 @@ if [ "${MERGE_TOL:-off}" = "on" ]; then MT_POS=0.2; MT_ANG=10.0; else MT_POS=0.0
 
 mkdir -p "${EXPERIMENT_DIR}"
 LOG_FILE="${EXPERIMENT_DIR}/pipeline_$(date +%Y%m%d_%H%M%S).log"
-echo "[cheap3b] model=Qwen2.5-VL-3B  steps/iter=20  iters=3  merge_tol=${MT_POS}/${MT_ANG}"
+echo "[cheap3b] model=Qwen2.5-VL-3B steps/iter=20 iters=3 merge_tol=${MT_POS}/${MT_ANG} train_cfg=${TRAIN_CFG:-train_grounding.yaml}"
 echo "Logging to: ${LOG_FILE}"
 [ -z "${WANDB_API_KEY:-}" ] && export WANDB_MODE=offline
 
@@ -41,7 +42,7 @@ python -m graphrl.main \
     project_name=viewsuite_graph_improve \
     experiment_name="${EXPERIMENT_NAME}" \
     initial_model_path=Qwen/Qwen2.5-VL-3B-Instruct \
-    general_overrides.rl.hydra_overrides.data.train_files="${SCRIPT_DIR}/train_turn_format.yaml" \
+    general_overrides.rl.hydra_overrides.data.train_files="${SCRIPT_DIR}/${TRAIN_CFG:-train_grounding.yaml}" \
     general_overrides.rl.hydra_overrides.data.val_files="${SCRIPT_DIR}/val.yaml" \
     iterations=3 \
     general_overrides.rl.hydra_overrides.trainer.n_gpus_per_node="${N_GPUS_PER_NODE}" \
