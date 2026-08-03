@@ -36,6 +36,8 @@ _POSE_RE = re.compile(
     r"rx=([\d.e+-]+)°?,\s*ry=([\d.e+-]+)°?,\s*rz=([\d.e+-]+)°?\]"
 )
 _ACTION_RE = re.compile(r"<action>(.*?)</action>", re.DOTALL)
+_GROUND_DESC_RE = re.compile(r"<description>(.*?)</description>", re.DOTALL | re.IGNORECASE)
+_GROUND_PRED_RE = re.compile(r"<prediction>(.*?)</prediction>", re.DOTALL | re.IGNORECASE)
 _ANSWER_RE = re.compile(r"^answer\s*\(", re.IGNORECASE)
 _IMAGE_PLACEHOLDER = "<image>"
 
@@ -390,6 +392,7 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
         # First pass: collect all states (pose + image) and actions
         states: List[Tuple[Dict[str, float], Optional[str]]] = []  # (pose, image_path)
         actions: List[Optional[str]] = []  # action text after each state
+        grounding_txt: List[Dict[str, str]] = []  # per-state {"desc","pred"} (grounding fmt)
         global_img_idx = 0
 
         for msg in messages:
@@ -417,6 +420,7 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
 
                 states.append((pose, obs_img_path))
                 actions.append(None)
+                grounding_txt.append({})
 
             elif role == "assistant":
                 action = _parse_action(content)
@@ -424,6 +428,18 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
                     action = _clean_action(action)
                 if action and actions:
                     actions[-1] = action
+                # Grounding format: cache the goal-AGNOSTIC visual text so it can be
+                # reused as SFT supervision after a hindsight goal relabel.
+                #   <description> describes the CURRENT view  -> belongs to state i
+                #   <prediction>  describes the NEXT view     -> belongs to state i+1
+                # (<think> is goal-dependent and deliberately NOT cached here.)
+                if grounding_txt:
+                    d = _GROUND_DESC_RE.search(content)
+                    p = _GROUND_PRED_RE.search(content)
+                    if d and grounding_txt:
+                        grounding_txt[-1]["desc"] = d.group(1).strip()
+                    if p and grounding_txt:
+                        grounding_txt[-1]["pred"] = p.group(1).strip()
 
         # Build transitions: (state_i, action_i, state_{i+1})
         transitions: List[Tuple[NodeData, EdgeData, NodeData]] = []
@@ -435,19 +451,34 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
             if action is None:
                 continue  # no valid action between these states
 
+            g_src = grounding_txt[i] if i < len(grounding_txt) else {}
+            g_dst = grounding_txt[i + 1] if i + 1 < len(grounding_txt) else {}
+            src_extra = {"scene_id": scene_id}
+            if g_src.get("desc"):
+                src_extra["view_desc"] = g_src["desc"]
+            dst_extra = {"scene_id": scene_id}
+            # prefer the NEXT state's own description; fall back to this step's prediction
+            if g_dst.get("desc"):
+                dst_extra["view_desc"] = g_dst["desc"]
+            elif g_src.get("pred"):
+                dst_extra["view_desc"] = g_src["pred"]
+
             src = ViewSuiteNodeData(
                 state={"scene_id": scene_id, "pose": pose_src},
                 obs_str=_pose_to_text(pose_src),
                 source_images=[img_src] if img_src else [],
-                extra={"scene_id": scene_id},
+                extra=src_extra,
             )
             dst = ViewSuiteNodeData(
                 state={"scene_id": scene_id, "pose": pose_dst},
                 obs_str=_pose_to_text(pose_dst),
                 source_images=[img_dst] if img_dst else [],
-                extra={"scene_id": scene_id},
+                extra=dst_extra,
             )
-            transitions.append((src, VagenEdgeData(obs_str=action), dst))
+            edge_extra = {}
+            if g_src.get("pred"):
+                edge_extra["pred_desc"] = g_src["pred"]
+            transitions.append((src, VagenEdgeData(obs_str=action, extra=edge_extra), dst))
 
         return transitions
 
