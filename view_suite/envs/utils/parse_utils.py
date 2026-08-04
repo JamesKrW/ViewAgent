@@ -178,24 +178,34 @@ _GROUNDING_RE = re.compile(
 def parse_grounding(response: str) -> Dict[str, Any]:
     """
     Grounding format:
-    ``<description>...</description><think>...</think><prediction>...</prediction><action>...</action>``
+    ``<description>..</description><think>..</think><prediction>..</prediction><action>..</action>``
 
-    ``description`` (current view) and ``prediction`` (next view) are goal-agnostic
-    visual grounding, so they survive hindsight goal relabeling and can be stored on
-    graph nodes / reused as SFT supervision. ``think`` is goal-dependent.
-
-    Returns ``{"ok", "description", "think", "prediction", "actions_blob"}``.
+    LENIENT on purpose. A small model emits sloppy variants (missing <prediction>,
+    stray text between tags). If we required an exact fullmatch, every such turn
+    would be a parse error -> no action executed, no reward, no learning signal, and
+    the policy could never bootstrap into the format. So: we only REQUIRE a
+    non-empty <action>; description/think/prediction are captured when present.
+    ``full_format`` reports whether all four tags were present in the right order —
+    that is what the per-turn format bonus should key on, so the format is still
+    rewarded without breaking the episode.
     """
-    m = _GROUNDING_RE.fullmatch(response)
-    if not m:
-        return {"ok": False, "description": "", "think": "",
-                "prediction": "", "actions_blob": ""}
+    a = _LENIENT_ACTION_RE.search(response)
+    if not a or not a.group("action").strip():
+        return {"ok": False, "description": "", "think": "", "prediction": "",
+                "actions_blob": "", "full_format": False}
+
+    def _grab(tag):
+        m = re.search(rf"<{tag}>([\s\S]*?)</{tag}>", response, re.IGNORECASE)
+        return m.group(1).strip() if m else ""
+
+    desc, think, pred = _grab("description"), _grab("think"), _grab("prediction")
     return {
         "ok": True,
-        "description": m.group("description").strip(),
-        "think": m.group("think").strip(),
-        "prediction": m.group("prediction").strip(),
-        "actions_blob": m.group("action").strip(),
+        "description": desc,
+        "think": think,
+        "prediction": pred,
+        "actions_blob": a.group("action").strip(),
+        "full_format": bool(_GROUNDING_RE.fullmatch(response)),
     }
 
 
