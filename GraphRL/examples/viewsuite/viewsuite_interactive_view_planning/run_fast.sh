@@ -2,7 +2,9 @@
 # =============================================================================
 # CHEAP TEST HARNESS — for iterating on ideas fast instead of burning 20-30h/run.
 #
-#   * Qwen2.5-VL-**3B** (not 7B)
+#   * Qwen2.5-VL-**7B** by default (MODEL_SIZE=3B is NOT usable: measured 0% action-tag
+#     rate with free_think and 20% with grounding, vs 100% for 7B — the 3B model emits
+#     incoherent text on this multi-turn visual task, so cost is cut via STEPS not size)
 #   * SFT every **20** RL steps (not 61) -> tighter RL<->SFT loop
 #   * **3** iterations (3 SFT rounds), no 300-step final iter
 #   => ~1/6 the cost of the full run. Validate an idea here, THEN scale to 7B.
@@ -32,7 +34,7 @@ if [ "${MERGE_TOL:-off}" = "on" ]; then MT_POS=0.2; MT_ANG=10.0; else MT_POS=0.0
 
 mkdir -p "${EXPERIMENT_DIR}"
 LOG_FILE="${EXPERIMENT_DIR}/pipeline_$(date +%Y%m%d_%H%M%S).log"
-echo "[cheap3b] model=Qwen2.5-VL-3B steps/iter=20 iters=3 merge_tol=${MT_POS}/${MT_ANG} train_cfg=${TRAIN_CFG:-train_grounding.yaml}"
+echo "[fast] model=Qwen2.5-VL-${MODEL_SIZE:-7B} steps/iter=20 iters=3 merge_tol=${MT_POS}/${MT_ANG} train_cfg=${TRAIN_CFG:-train_grounding.yaml}"
 echo "Logging to: ${LOG_FILE}"
 [ -z "${WANDB_API_KEY:-}" ] && export WANDB_MODE=offline
 
@@ -41,7 +43,7 @@ python -m graphrl.main \
     --config-name=pipeline \
     project_name=viewsuite_graph_improve \
     experiment_name="${EXPERIMENT_NAME}" \
-    initial_model_path=Qwen/Qwen2.5-VL-3B-Instruct \
+    initial_model_path=Qwen/Qwen2.5-VL-${MODEL_SIZE:-7B}-Instruct \
     general_overrides.rl.hydra_overrides.data.train_files="${SCRIPT_DIR}/${TRAIN_CFG:-train_grounding.yaml}" \
     general_overrides.rl.hydra_overrides.data.val_files="${SCRIPT_DIR}/val.yaml" \
     iterations=3 \
