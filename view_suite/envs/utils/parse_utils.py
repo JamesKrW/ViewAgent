@@ -77,13 +77,15 @@ _FORMAT_TEMPLATES: Dict[str, str] = {
     # so unlike <think> it stays valid after a hindsight goal relabel -> it can be
     # cached on the graph node and reused as SFT supervision.
     "grounding": (
-        "You need to describe what you currently see, reason, predict the next "
-        "view, then act. Respond in this format:\n"
-        "<description>[what is visible in the current view: objects, layout, "
-        "where you are facing]</description>"
-        "<think>[why this action moves you toward the target]</think>"
-        "<prediction>[what you expect to see after the action]</prediction>"
+        "First briefly describe what you see, then reason, then act. "
+        "Respond in this format:\n"
+        "<description>[one short sentence: the main objects/layout in the current "
+        "view]</description>"
+        "<think>[one short sentence: why this action moves you toward the target]"
+        "</think>"
         "<action>{action_example}</action>\n"
+        "Keep <description> and <think> to ONE short sentence each, and ALWAYS end "
+        "with the <action> tag.\n"
         "{action_description}"
     ),
 }
@@ -165,10 +167,13 @@ def parse_free_think(response: str) -> Dict[str, Any]:
     }
 
 
+# full grounding = description + think + action. <prediction> was dropped: a 3B model
+# spent its whole budget on 4 tags and never emitted <action> (1992 of 2552 turns had
+# NO action tag). The "next view" is simply the NEXT turn's <description>, which the
+# graph builder already prefers, so nothing is lost.
 _GROUNDING_RE = re.compile(
     r'^\s*<description>(?P<description>[\s\S]*?)</description>\s*'
     r'<think>(?P<think>[\s\S]*?)</think>\s*'
-    r'<prediction>(?P<prediction>[\s\S]*?)</prediction>\s*'
     r'<action>(?P<action>[\s\S]*?)</action>\s*$',
     re.IGNORECASE
 )
