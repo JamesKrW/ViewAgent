@@ -5,9 +5,13 @@
 #   * Qwen2.5-VL-**7B** by default (MODEL_SIZE=3B is NOT usable: measured 0% action-tag
 #     rate with free_think and 20% with grounding, vs 100% for 7B — the 3B model emits
 #     incoherent text on this multi-turn visual task, so cost is cut via STEPS not size)
-#   * SFT every **20** RL steps (not 61) -> tighter RL<->SFT loop
+#   * SFT every **61** RL steps — MUST match the baselines. 20 was too few:
+#     IVP only emerges after ~120-180 cumulative RL steps (baseline was 0.0 at 61
+#     steps and only hit 18% by ~180), so a 20x3=60-step run measures nothing.
+#     Cost is saved by skipping iter3's 300 steps, not by starving the RL.
 #   * **3** iterations (3 SFT rounds), no 300-step final iter
-#   => ~1/6 the cost of the full run. Validate an idea here, THEN scale to 7B.
+#   => 183 vs 483 RL steps ~= 40% of the full run, while staying in the regime
+#      where IVP actually emerges.
 #
 # Knobs meant to be flipped from the command line (see examples below):
 #   general_overrides.traj_to_sft.graph_builder.merge_tol.position/.angle
@@ -34,7 +38,7 @@ if [ "${MERGE_TOL:-off}" = "on" ]; then MT_POS=0.2; MT_ANG=10.0; else MT_POS=0.0
 
 mkdir -p "${EXPERIMENT_DIR}"
 LOG_FILE="${EXPERIMENT_DIR}/pipeline_$(date +%Y%m%d_%H%M%S).log"
-echo "[fast] model=Qwen2.5-VL-${MODEL_SIZE:-7B} steps/iter=20 iters=3 merge_tol=${MT_POS}/${MT_ANG} train_cfg=${TRAIN_CFG:-train_grounding.yaml}"
+echo "[fast] model=Qwen2.5-VL-${MODEL_SIZE:-7B} steps/iter=${STEPS_PER_ITER:-61} iters=3 merge_tol=${MT_POS}/${MT_ANG} train_cfg=${TRAIN_CFG:-train_grounding.yaml}"
 echo "Logging to: ${LOG_FILE}"
 [ -z "${WANDB_API_KEY:-}" ] && export WANDB_MODE=offline
 
@@ -53,9 +57,9 @@ python -m graphrl.main \
     general_overrides.rl.hydra_overrides.trainer.test_freq=10 \
     general_overrides.sft.n_gpus="${SFT_N_GPUS}" \
     'general_overrides.traj_to_sft.generators=[multi_turn_action_gen,view_difference,view_difference_mcq]' \
-    iteration_overrides.iter0.rl.training_steps=20 \
-    iteration_overrides.iter1.rl.training_steps=20 \
-    iteration_overrides.iter2.rl.training_steps=20 \
+    iteration_overrides.iter0.rl.training_steps=${STEPS_PER_ITER:-61} \
+    iteration_overrides.iter1.rl.training_steps=${STEPS_PER_ITER:-61} \
+    iteration_overrides.iter2.rl.training_steps=${STEPS_PER_ITER:-61} \
     general_overrides.traj_to_sft.graph_builder.atomize.enabled=true \
     general_overrides.traj_to_sft.graph_builder.merge_tol.position=${MT_POS} \
     general_overrides.traj_to_sft.graph_builder.merge_tol.angle=${MT_ANG} \
