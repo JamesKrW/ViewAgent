@@ -167,6 +167,27 @@ export VIEWSUITE_ROOT="$(pwd)"
 bash scripts/scannet_http_service_loop.sh 32 0 1 8767 10800 open3d
 ```
 
+**Mesh backend (habitat, multi-GPU)** — same meshes, but renders through Habitat-Sim, which
+takes an explicit `gpu_device_id`. Open3D goes through Filament → EGL, and EGL enumerates devices
+independently of CUDA, so `CUDA_VISIBLE_DEVICES` does not move it and every worker lands on GPU 0 —
+which is why the open3d backend only ever scales on a single-GPU box. Use habitat when you have
+several GPUs. Note the shading differs, so **results are not comparable across the two backends**.
+
+```bash
+# habitat-sim cannot share an env with the training stack, and needs the service deps too
+conda create -y -n habitat python=3.9
+conda install -y -n habitat habitat-sim headless -c conda-forge -c aihabitat
+conda run -n habitat pip install uvicorn fastapi fire httpx python-multipart plyfile
+
+export VIEWSUITE_ROOT="$(pwd)"
+#   160 workers = 20 resident scenes per GPU across 8 GPUs
+bash scripts/scannet_http_service_loop.sh 160 0,1,2,3,4,5,6,7 1 8767 10800 habitat
+```
+
+See [`docs/render_service.md`](docs/render_service.md) for backend trade-offs, how to size
+workers against VRAM, serving over TLS when the client is on another machine, and the
+gotchas (GL contexts, Z-up meshes, non-square intrinsics).
+
 **3D-Gaussian-Splatting backend (gsplat, only test split available)** — renders from pretrained per-scene 3DGS reconstructions of the ScanNet scenes ([`GaussianWorld/scannet_mcmc_1.5M_3dgs`](https://huggingface.co/datasets/GaussianWorld/scannet_mcmc_1.5M_3dgs), from the [SceneSplat-7K](https://huggingface.co/datasets/GaussianWorld/scene_splat_7k) project). Download those first into `data/scannet_3dgs_mcmc/`:
 
 ```bash
