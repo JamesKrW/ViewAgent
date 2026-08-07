@@ -21,7 +21,7 @@ run:
 
 backends:
   azure_responses:
-    azure_endpoint: "https://linjl-ma65uv6u-eastus2.cognitiveservices.azure.com/"
+    azure_endpoint: "" # your azure endpoint, e.g. https://my-azure-endpoint.openai.azure.com/
     azure_api_key: ""         # or export AZURE_API_KEY
     azure_api_version: "2025-04-01-preview"
     deployment: "gpt-5.4-pro"
