@@ -112,12 +112,18 @@ bash scripts/install_service.sh
 
 ### Service side — ScanNet scans + meshes (large)
 
-Lives on the render-service machine. Downloads from the public dataset repo [`MLL-Lab/viewsuite`](https://huggingface.co/datasets/MLL-Lab/viewsuite).
+Lives on the render-service machine. Downloads from [`MLL-Lab/viewsuite`](https://huggingface.co/datasets/MLL-Lab/viewsuite),
+which is **gated** — request access, then authenticate, or the download fails with
+`Cannot access gated repo`.
 
 ```bash
+export HF_TOKEN=hf_xxx               # or: huggingface-cli login
 bash scripts/download_scannet.sh
-# downloads scannet.tar.gz into data/
+# downloads scannet.tar.gz into data/ and unpacks it (286 scenes, ~55 GB)
 ```
+
+Run this with Python 3.10+. The downloader uses `str | None` annotations, so a 3.9
+interpreter — the one habitat-sim needs, if you set that up first — fails to parse it.
 
 ### Local — ViewSuite tasks (jsonl + small assets)
 
