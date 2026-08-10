@@ -298,6 +298,83 @@ def _get_scene_node_ids(graph: BaseGraph) -> Dict[str, List[str]]:
     return dict(scene_nodes)
 
 
+def _step_record(graph: BaseGraph, u: str, v: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    """One path step, in the shape every generator expects."""
+    return {
+        "from_id": u,
+        "from_state": graph._g.nodes[u]["obs_str"],
+        "action": data["obs_str"],
+        "to_id": v,
+        "to_state": graph._g.nodes[v]["obs_str"],
+    }
+
+
+def _walk_paths_for_scene(
+    graph: BaseGraph,
+    scene_node_ids: List[str],
+    min_len: int,
+    max_len: int,
+    cap: Optional[int] = None,
+) -> Tuple[List[List[Dict[str, Any]]], Dict[int, int], bool]:
+    """Enumerate every distinct path of length ``min_len``..``max_len``.
+
+    Exhaustive counterpart of the random walk below, and deliberately identical in
+    what counts as a path: nodes may not repeat, and two paths are distinct when
+    their *edge-key* sequences differ (the graph is a multigraph, so parallel edges
+    between the same pair are different paths).
+
+    Returns ``(paths, count_by_length, truncated)``. Enumeration stops once ``cap``
+    paths exist, in which case ``truncated`` is True and the counts are lower bounds
+    — a dense graph has combinatorially many paths and counting them all is neither
+    possible nor useful.
+    """
+    counts: Dict[int, int] = {L: 0 for L in range(min_len, max_len + 1)}
+    out: List[List[Dict[str, Any]]] = []
+    if not scene_node_ids or graph._g.number_of_edges() == 0:
+        return out, counts, False
+
+    def walk(cur: str, visited: Set[str], steps: List[Dict[str, Any]]) -> bool:
+        """Depth-first extend. Returns False once the cap is hit."""
+        depth = len(steps)
+        if depth >= min_len:
+            counts[depth] += 1
+            out.append(list(steps))
+            if cap is not None and len(out) >= cap:
+                return False
+        if depth >= max_len:
+            return True
+        for u, v, _eid, data in graph._g.out_edges(cur, data=True, keys=True):
+            if v in visited:
+                continue
+            steps.append(_step_record(graph, u, v, data))
+            visited.add(v)
+            keep_going = walk(v, visited, steps)
+            visited.discard(v)
+            steps.pop()
+            if not keep_going:
+                return False
+        return True
+
+    for start in scene_node_ids:
+        if not walk(start, {start}, []):
+            return out, counts, True
+    return out, counts, False
+
+
+def _count_paths_by_length(
+    graph: BaseGraph,
+    scene_node_ids: List[str],
+    min_len: int,
+    max_len: int,
+    cap: Optional[int] = None,
+) -> Tuple[Dict[int, int], bool]:
+    """How many paths of each length this scene can yield. See _walk_paths_for_scene."""
+    _, counts, truncated = _walk_paths_for_scene(
+        graph, scene_node_ids, min_len, max_len, cap
+    )
+    return counts, truncated
+
+
 def _sample_paths_for_scene(
     graph: BaseGraph,
     scene_node_ids: List[str],
@@ -305,22 +382,77 @@ def _sample_paths_for_scene(
     max_len: int,
     num_samples: int,
     rng: random.Random,
+    *,
+    sample_fraction: Optional[float] = None,
+    attempts_multiplier: int = 30,
+    pool_cap: Optional[int] = None,
+    telemetry: Optional[List[Dict[str, Any]]] = None,
+    scene_id: str = "",
 ) -> List[List[Dict[str, Any]]]:
-    """Sample random-walk paths starting from nodes of a specific scene.
+    """Sample paths starting from nodes of a specific scene.
 
-    Same logic as BaseGraph.sample_paths but start nodes are restricted to
-    *scene_node_ids*.  Walks may traverse edges to nodes in other scenes
-    (the graph is shared), but the starting node is always within the scene.
+    Start nodes are restricted to *scene_node_ids*; walks may cross into other
+    scenes (the graph is shared).
+
+    Two knobs beyond the original absolute ``num_samples``:
+
+    ``sample_fraction``
+        Take this fraction of the paths the scene can actually produce, instead of a
+        fixed count. Comparing two methods at a fixed count is not a fair control
+        when one of them builds a much richer graph: the richer method is throttled
+        and the sparser one is asked for more than it has. A fraction holds the
+        *rate* equal and lets the volume follow from the graph, which is the thing
+        being compared.
+
+    ``attempts_multiplier``
+        Retry budget per requested path. Previously the budget was
+        ``num_samples * 30``, so asking for fewer paths also allowed fewer attempts
+        to find them — on a sparse graph, where unique paths are hardest to hit,
+        the arm that needed more attempts got fewer. It is now independent of how
+        the target was derived, and the exhaustive branch below removes the need for
+        it entirely in the sparse case.
+
+    When the pool is no larger than the target we enumerate and return everything:
+    random-walking for paths you could just list is what made the old sampler
+    undershoot its own budget on early, sparse graphs.
     """
     if not scene_node_ids or graph._g.number_of_edges() == 0:
         return []
 
+    target = int(num_samples)
+    pool_counts: Optional[Dict[int, int]] = None
+    truncated = False
+
+    if sample_fraction is not None or telemetry is not None:
+        cap = pool_cap if pool_cap is not None else max(4 * max(target, 1), 5000)
+        enumerated, pool_counts, truncated = _walk_paths_for_scene(
+            graph, scene_node_ids, min_len, max_len, cap
+        )
+        pool_total = sum(pool_counts.values())
+        if sample_fraction is not None:
+            target = max(1, int(round(float(sample_fraction) * pool_total)))
+        if telemetry is not None:
+            telemetry.append({
+                "scene_id": scene_id,
+                "min_len": min_len,
+                "max_len": max_len,
+                "pool_by_length": dict(pool_counts),
+                "pool_total": pool_total,
+                "pool_truncated": truncated,
+                "target": target,
+            })
+        # Small pool: return it outright rather than trying to rediscover it by
+        # random walk (and failing, which is what the attempt cap used to cause).
+        if not truncated and pool_total <= target:
+            rng.shuffle(enumerated)
+            return enumerated
+
     seen: Set[Tuple] = set()
     paths: List[List[Dict[str, Any]]] = []
-    max_attempts = num_samples * 30
+    max_attempts = target * attempts_multiplier
     attempts = 0
 
-    while len(paths) < num_samples and attempts < max_attempts:
+    while len(paths) < target and attempts < max_attempts:
         attempts += 1
         cur = rng.choice(scene_node_ids)
         target_len = rng.randint(min_len, max_len)
