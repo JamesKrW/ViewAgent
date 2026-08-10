@@ -368,10 +368,47 @@ def _count_paths_by_length(
     max_len: int,
     cap: Optional[int] = None,
 ) -> Tuple[Dict[int, int], bool]:
-    """How many paths of each length this scene can yield. See _walk_paths_for_scene."""
-    _, counts, truncated = _walk_paths_for_scene(
-        graph, scene_node_ids, min_len, max_len, cap
-    )
+    """How many paths of each length this scene can yield.
+
+    Counts without materialising the paths — the same traversal as
+    _walk_paths_for_scene, but only the tally is kept. Building step records for
+    every path is what makes the exhaustive version expensive at longer lengths,
+    where a single scene can hold millions of them.
+
+    ``cap`` bounds the number counted per scene; ``truncated`` says whether it bit,
+    in which case the counts are lower bounds.
+    """
+    counts: Dict[int, int] = {L: 0 for L in range(min_len, max_len + 1)}
+    if not scene_node_ids or graph._g.number_of_edges() == 0:
+        return counts, False
+
+    g = graph._g
+    total = 0
+    truncated = False
+
+    def walk(cur: str, visited: Set[str], depth: int) -> bool:
+        nonlocal total, truncated
+        if depth >= min_len:
+            counts[depth] += 1
+            total += 1
+            if cap is not None and total >= cap:
+                truncated = True
+                return False
+        if depth >= max_len:
+            return True
+        for _u, v, _eid in g.out_edges(cur, keys=True):
+            if v in visited:
+                continue
+            visited.add(v)
+            keep_going = walk(v, visited, depth + 1)
+            visited.discard(v)
+            if not keep_going:
+                return False
+        return True
+
+    for start in scene_node_ids:
+        if not walk(start, {start}, 0):
+            break
     return counts, truncated
 
 
