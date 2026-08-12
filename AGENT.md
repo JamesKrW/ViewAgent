@@ -107,5 +107,5 @@ forward), `enforce_eager=true`, `engine_kwargs.vllm.limit_mm_per_prompt={image:1
   actor/critic FSDP update all run cleanly (verified step 1: reward mean ≈ 0.20, sane grads).
 - ⏳ Full smoke (RL → traj_to_sft → SFT → next iter) validating end to end.
 
-Helper scripts + logs: `/home/kangrui/projects/viewagent/_setup/`. verl PR #6578 diff:
+Helper scripts + logs: `_setup/` next to the checkout. verl PR #6578 diff:
 `_setup/verl_pr6578.diff`.
