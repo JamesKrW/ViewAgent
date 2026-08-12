@@ -4,8 +4,9 @@
 # Runs the 4 models in parallel for each mode, modes sequentially (nothink then
 # high) to bound concurrent load on OpenRouter and the shared render server.
 # "medium" is NOT run — it reuses the published baseline (see
-# analyze_reasoning_sweep.py). All traffic goes through `with-proxy` because
-# dev-machine egress to the render server IPs is only reachable via egress-proxy.
+# analyze_reasoning_sweep.py). All traffic is wrapped in the proxy helper because
+# on some hosts outbound access to the render server is only available through a
+# proxy; drop the wrapper if yours can reach it directly.
 #
 # Designed to be launched under `systemd-run --user` so it survives Claude Code
 # session teardown, e.g.:
