@@ -17,9 +17,9 @@ Runs on an 8×H200 box. conda env: **`viewsuite`** (Python 3.12).
   `InternVLForConditionalGeneration` impl (falls back to the transformers backend → garbage output).
   vLLM 0.11.0 supports it natively. So **eval uses the vLLM backend** and **RL rollout uses
   `rollout.name=vllm`**. (This also matches verl PR #6578, which is vLLM-based.)
-- The render service (`client_url.txt`, external RTX-4090 boxes) is only reachable from this Meta
-  box **via `with-proxy`**. So run eval / training under `with-proxy`. `meta.wandb.io` and
-  `127.0.0.1` are kept off the proxy (`no_proxy`).
+- The render service (`client_url.txt`, external GPU boxes) may only be reachable through an
+  egress proxy; set `EGRESS_PROXY` in that case. Keep anything self-hosted (the W&B endpoint,
+  `127.0.0.1`) in `NO_PROXY_EXTRA` so it stays off the proxy.
 
 ---
 
@@ -74,8 +74,8 @@ with-proxy bash examples/viewsuite/viewsuite_interactive_view_planning/run_inter
 Config: `pipeline_internvl35_8b.yaml` (mirrors `pipeline_qwen3vl8b.yaml`):
 `initial_model_path=OpenGVLab/InternVL3_5-8B-HF`, SFT `template=intern_vl`, `rollout.name=vllm`.
 
-W&B: meta W&B creds live in repo `.env` (`WANDB_BASE_URL=https://meta.wandb.io`, entity `kangrui`).
-The run scripts source `.env` and add `meta.wandb.io` to `no_proxy`; if `WANDB_API_KEY` is unset
+W&B: creds live in the repo `.env` (`WANDB_BASE_URL`, `WANDB_ENTITY`). The run scripts source
+`.env` and keep the W&B host off the proxy via `NO_PROXY_EXTRA`; if `WANDB_API_KEY` is unset
 they fall back to `WANDB_MODE=offline`.
 
 ---

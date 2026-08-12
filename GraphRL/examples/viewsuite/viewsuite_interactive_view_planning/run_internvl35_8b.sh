@@ -32,7 +32,7 @@ mkdir -p "${EXPERIMENT_DIR}"
 LOG_FILE="${EXPERIMENT_DIR}/pipeline_$(date +%Y%m%d_%H%M%S).log"
 echo "Logging to: ${LOG_FILE}"
 
-# Meta W&B creds from repo .env (WANDB_API_KEY / WANDB_BASE_URL=https://meta.wandb.io / WANDB_ENTITY).
+# W&B creds from repo .env (WANDB_API_KEY / WANDB_BASE_URL=https://${WANDB_HOST:-your-wandb-host} / WANDB_ENTITY).
 [ -f "${REPO_ROOT}/.env" ] && { set -a; . "${REPO_ROOT}/.env"; set +a; }
 
 # Egress proxy, set inline so the run does not depend on a shell wrapper. Needed when

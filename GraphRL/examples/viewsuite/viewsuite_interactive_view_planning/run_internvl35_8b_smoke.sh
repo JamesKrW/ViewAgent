@@ -31,9 +31,9 @@ LOG_FILE="${EXPERIMENT_DIR}/pipeline_$(date +%Y%m%d_%H%M%S).log"
 echo "Logging to: ${LOG_FILE}"
 echo "SMOKE: 3 iters x 10 RL steps, small batch, 1 SFT epoch, ${N_GPUS_PER_NODE} GPU(s)"
 
-# Meta W&B creds from repo .env; keep meta.wandb.io off the forward proxy.
+# W&B creds from repo .env; keep ${WANDB_HOST:-your-wandb-host} off the forward proxy.
 [ -f "${REPO_ROOT}/.env" ] && { set -a; . "${REPO_ROOT}/.env"; set +a; }
-export no_proxy="${no_proxy:-},meta.wandb.io,.wandb.io"; export NO_PROXY="${no_proxy}"
+export no_proxy="localhost,127.0.0.1,::1${NO_PROXY_EXTRA:+,$NO_PROXY_EXTRA}"; export NO_PROXY="${no_proxy}"
 
 if [ -z "${WANDB_API_KEY:-}" ]; then
     export WANDB_MODE=offline
