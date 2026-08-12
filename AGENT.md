@@ -4,7 +4,7 @@ Adds training + evaluation of **`OpenGVLab/InternVL3_5-8B-HF`** to the ViewSuite
 pipeline (RL self-exploration + view-graph SFT for interactive view planning), alongside
 the existing Qwen2.5-VL-7B / Qwen3-VL-8B recipes.
 
-Runs on `devgpu004` (8×H200). conda env: **`viewsuite`** (Python 3.12).
+Runs on an 8×H200 box. conda env: **`viewsuite`** (Python 3.12).
 
 ---
 

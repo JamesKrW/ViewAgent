@@ -35,12 +35,15 @@ echo "Logging to: ${LOG_FILE}"
 # Meta W&B creds from repo .env (WANDB_API_KEY / WANDB_BASE_URL=https://meta.wandb.io / WANDB_ENTITY).
 [ -f "${REPO_ROOT}/.env" ] && { set -a; . "${REPO_ROOT}/.env"; set +a; }
 
-# Forward proxy inline (the render service = external IPs; needs the proxy). Internal
-# hosts incl. meta.wandb.io stay off-proxy. Avoids relying on the `with-proxy` wrapper.
-export http_proxy=http://egress-proxy:8080 https_proxy=http://egress-proxy:8080
-export HTTP_PROXY=http://egress-proxy:8080 HTTPS_PROXY=http://egress-proxy:8080
-export no_proxy=".fbcdn.net,.facebook.com,.fbinfra.net,.thefacebook.com,.tfbnw.net,.fb.com,.fburl.com,.facebook.net,.sb.fbsbx.com,meta.wandb.io,.wandb.io,localhost,127.0.0.1,::1"
-export NO_PROXY="$no_proxy"
+# Egress proxy, set inline so the run does not depend on a shell wrapper. Needed when
+# the render service is reachable only through a proxy; leave EGRESS_PROXY unset if this
+# host can reach it directly. Keep anything hosted locally in NO_PROXY_EXTRA.
+if [ -n "${EGRESS_PROXY:-}" ]; then
+  export http_proxy="$EGRESS_PROXY" https_proxy="$EGRESS_PROXY"
+  export HTTP_PROXY="$EGRESS_PROXY" HTTPS_PROXY="$EGRESS_PROXY"
+  export no_proxy="localhost,127.0.0.1,::1${NO_PROXY_EXTRA:+,$NO_PROXY_EXTRA}"
+  export NO_PROXY="$no_proxy"
+fi
 
 # InternVL: model cached; LLaMA-Factory trl<=0.24 check skipped (verl needs trl 0.26.2).
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
