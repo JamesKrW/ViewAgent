@@ -64,7 +64,7 @@ def _load_builder(kind: str):
 
 
 def build_graph(kind: str, rollout_dir: Path, max_files: int | None,
-                merge_pos: float, merge_ang: float):
+                merge_pos: float, merge_ang: float, dedup: bool = True):
     cls = _load_builder(kind)
     # Same merge tolerance the runs used (run.sh overrides the 1e-3 default). This is
     # what lets grid-identical poses from different trajectories merge, so it is the
@@ -86,7 +86,19 @@ def build_graph(kind: str, rollout_dir: Path, max_files: int | None,
         images_dir = Path(tmp) / "images"
         images_dir.mkdir()
         graph = builder._build_sequential(files, rollout_dir, images_dir)
-    return graph, len(files)
+    n_before = graph._g.number_of_nodes()
+    merged = 0
+    if dedup:
+        # Insertion-time dedup is EXACT: unique_key md5s the pose at 4dp, and
+        # _upsert_node is a plain key lookup, so merge_tol plays no part there and
+        # float drift keeps grid-identical poses in different trajectories apart.
+        # The tolerance only bites in the pose-similarity pass that atomize runs
+        # (bucket_key + is_similar_to). Skipping it measures the graph *before* the
+        # merge that defines the method -- which is why both arms then come out with
+        # near-identical node counts. It needs no renderer, so run it here.
+        from .graph_atomize import _pose_dedup
+        merged = _pose_dedup(builder, graph)
+    return graph, len(files), n_before, merged
 
 
 def main() -> None:
@@ -101,6 +113,8 @@ def main() -> None:
                     help="graph_builder.merge_tol.position as used by run.sh")
     ap.add_argument("--merge-ang", type=float, default=10.0,
                     help="graph_builder.merge_tol.angle as used by run.sh")
+    ap.add_argument("--no-dedup", action="store_true",
+                    help="skip the pose-similarity merge (measures the raw parse)")
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args()
     logging.basicConfig(level=logging.ERROR)
@@ -109,8 +123,9 @@ def main() -> None:
     rows = []
     for spec in a.arm:
         kind, _, path = spec.partition(":")
-        graph, n_files = build_graph(kind, Path(path), a.max_files,
-                                     a.merge_pos, a.merge_ang)
+        graph, n_files, n_before, merged = build_graph(
+            kind, Path(path), a.max_files, a.merge_pos, a.merge_ang,
+            dedup=not a.no_dedup)
         scenes = _get_scene_node_ids(graph)
         per_len = {L: 0 for L in lens}
         capped = 0
@@ -125,6 +140,7 @@ def main() -> None:
             "arm": kind, "rollout_files": n_files,
             "nodes": graph._g.number_of_nodes(), "edges": graph._g.number_of_edges(),
             "scenes": len(scenes), "scenes_capped": capped,
+            "nodes_before_merge": n_before, "nodes_merged_away": merged,
             "paths_by_length": per_len, "paths_total": sum(per_len.values()),
         })
 
