@@ -20,7 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
 # --- environment -----------------------------------------------------------
-source /home/kangrui/miniconda3/etc/profile.d/conda.sh
+source "${CONDA_PREFIX_ROOT:-$HOME/miniconda3}/etc/profile.d/conda.sh"
 conda activate viewagent_reason
 # shellcheck disable=SC1091
 source "${REPO_ROOT}/.env.reasoning"
