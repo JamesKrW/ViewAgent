@@ -56,3 +56,7 @@ AGENT.md
 
 # VLM screen artefacts: rejected views copied out for eyeballing, regenerable
 /gs_filter_review/
+
+# VLM screen artefacts for the regenerated corpora
+/ai2thor_filter_review_v2/
+/gs_filter_review_v2/

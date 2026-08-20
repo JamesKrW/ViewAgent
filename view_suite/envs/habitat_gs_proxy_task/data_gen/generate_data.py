@@ -73,16 +73,33 @@ class GenConfig:
     step_translation_min_m: float = 0.25
     step_translation_max_m: float = 8.0
     # --- ground-truth path ---
-    gt_seq_min: int = 2
-    gt_seq_max: int = 6
+    # 3-10, wider and longer than the 2-6 the AI2-THOR generator uses. Two reasons:
+    # length-2 paths were the easiest slice for the untrained baseline (9.3% against
+    # ~5% elsewhere) and are close to trivial, and IVP allows 10 turns, so a path the
+    # agent cannot even replay within its turn budget is the interesting end.
+    gt_seq_min: int = 3
+    gt_seq_max: int = 10
     num_distractors: int = 3
     # --- rejection ---
     max_resample_tries: int = 30
     min_image_std: float = 8.0          # flat frame => nothing to recognise
     min_image_mean: float = 12.0        # near-black
     max_dominant_pixel_frac: float = 0.8
-    degen_pos_thr_frac: float = 1.0     # x step_translation
+    # Reject a sample whose target is close enough to the start that submitting the
+    # initial pose unchanged would score. The env's success test is
+    # (pos_err <= 1.0 x step) AND (ang_err <= 30), so these must be at least that wide
+    # -- and the position one is deliberately wider, because equal thresholds leave
+    # samples sitting exactly on the success line: at 1.0 the corpus ended up with 129
+***REMOVED***
+    # samples that a do-nothing agent solved, outscoring the untrained model, with
+    # having a final error identical to the initial offset. It never moved.
+    #
+    # The angle needs an epsilon rather than a wider bound: a clean 30-degree rotation
+    # comes back as 30.00000000000003, so `<= 30.0` let 39 pure-rotation samples --
+    # target position identical to the start -- straight through.
+    degen_pos_thr_frac: float = 2.0     # x step_translation; success test uses 1.0
     degen_ang_thr: float = 30.0
+    degen_ang_eps: float = 1e-6
     seed: int = 0
 
 
@@ -207,7 +224,8 @@ def build_sample(renderer: HabitatGSRenderer, scene_id: str, sample_idx: int,
             continue
         # Trivially-solved sample: the target is already where the agent starts.
         d_pos, d_ang = pose_distance(init.get_c2w(), gt_vm.get_c2w())
-        if d_pos <= cfg.degen_pos_thr_frac * step_t and d_ang <= cfg.degen_ang_thr:
+        if (d_pos <= cfg.degen_pos_thr_frac * step_t
+                and d_ang <= cfg.degen_ang_thr + cfg.degen_ang_eps):
             continue
         gt_img = renderer.render_image_from_cam_param(K, gt_vm.get_c2w(),
                                                       cfg.width, cfg.height)
@@ -228,7 +246,8 @@ def build_sample(renderer: HabitatGSRenderer, scene_id: str, sample_idx: int,
                 continue
             # Must be visibly distinct from the target, or the MCQ has two right answers.
             dp, da = pose_distance(gt_vm.get_c2w(), cand_vm.get_c2w())
-            if dp <= cfg.degen_pos_thr_frac * step_t and da <= cfg.degen_ang_thr:
+            if (dp <= cfg.degen_pos_thr_frac * step_t
+                    and da <= cfg.degen_ang_thr + cfg.degen_ang_eps):
                 continue
             cand_img = renderer.render_image_from_cam_param(K, cand_vm.get_c2w(),
                                                             cfg.width, cfg.height)

@@ -62,7 +62,7 @@ def _pose_within(pose_a: Dict, pose_b: Dict, pos_thr: float, ang_thr: float) -> 
     b = c2w_extrinsic_to_se3(unity_pose_to_c2w(pose_b), degrees=True)
     pos = float(np.linalg.norm(np.array(a[:3]) - np.array(b[:3])))
     ang = float(geodesic_angle_deg(np.array(a[3:]), np.array(b[3:])))
-    return pos <= pos_thr and ang <= ang_thr
+    return pos <= pos_thr and ang <= ang_thr + 1e-6
 
 
 # ---------- Action vocabulary (matches ScanNet proxy task) ----------
@@ -105,8 +105,18 @@ class GenConfig:
     max_dominant_pixel_frac: float = 0.8
     # Reject a GT target whose pose is already within the IVP success threshold
     # of the initial pose (task would be trivially solved at step 0).
-    degen_pos_thr: float = 0.5
+    # Must be WIDER than the env's success test (0.5 m / 30 deg), not equal to it.
+    # Equal thresholds leave samples sitting exactly on the success line, and the
+    # generator's targets cluster there: the released corpus has a median init->target
+    # distance of exactly 0.50 m (one step) and a median rotation of exactly 30 deg
+***REMOVED***
+    # (one turn), so a sizeable fraction of every split is solved by submitting the
+    #
+    # The epsilon matters independently: a clean 30-degree rotation comes back as
+    # 30.00000000000003, so `<= 30.0` lets pure-rotation targets straight through.
+    degen_pos_thr: float = 1.0          # 2 x the 0.5 m success threshold
     degen_ang_thr: float = 30.0
+    degen_ang_eps: float = 1e-6
 
 
 # =============================================================================
