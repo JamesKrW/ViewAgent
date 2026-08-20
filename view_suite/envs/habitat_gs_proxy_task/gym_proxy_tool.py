@@ -107,7 +107,21 @@ class GymProxyTool(GymHabitatGSToolEnv):
         self.action_only_mode = bool(self.config.get("action_only_mode", False))
 
         # --- Tolerances ---
-        self.tol_per_action_len = self.config.get(
+        # Habitat-GS scales the translation step per scene (0.25 m in a small room,
+        # up to 8 m in a plaza), so a FIXED metric tolerance does not mean the same
+        # thing across the corpus. ScanNet and AI2-THOR both use a 0.5 m step with a
+        # 0.5 m tolerance, i.e. "within one action" counts -- ratio 1.0. Holding 0.5 m
+        # fixed here would make that ratio range from 2.0 to 0.06, so the same
+        # off-by-one-action behaviour passes in a room and fails in a plaza, and the
+        # large-step half of the corpus silently demands an exact hit. Measured on the
+        # untrained baseline: every one of the 17 successes had step <= 0.5 m, and none
+        # was an exact hit.
+        #
+        # So the tolerance follows the step. tol_per_action_len is disabled because it
+        # keys on path length, which is not what varies here.
+        self.tol_scale_with_step = bool(self.config.get("tol_scale_with_step", True))
+        self.tol_step_multiple = float(self.config.get("tol_step_multiple", 1.0))
+        self.tol_per_action_len = None if self.tol_scale_with_step else self.config.get(
             "tol_per_action_len", "0.25,15;2:0.5,30;3-5:0.5,30;0.5,30"
         )
         if self.tol_per_action_len is None:
@@ -345,6 +359,13 @@ class GymProxyTool(GymHabitatGSToolEnv):
         if _pitch is not None:
             self.pitch_limit_deg = float(_pitch)
             self.view_engine.pitch_limit = float(_pitch)
+        # Tolerance follows the step, so "within one action" means the same thing in a
+        # 23 m room and a 538 m plaza -- and the same thing it means in ScanNet and
+        # AI2-THOR, where a fixed 0.5 m step sits under a fixed 0.5 m tolerance.
+        if self.tol_scale_with_step and _step_t is not None:
+            self.tol_trans_l2_m = self.tol_step_multiple * float(_step_t)
+            self.tol_rot_l2_deg = self.tol_step_multiple * float(
+                _step_r if _step_r is not None else self.step_rotation_deg)
         # The prompt quotes these, and it is cached on first access.
         for _attr in ("_tool_instruction", "action_description"):
             self.__dict__.pop(_attr, None)

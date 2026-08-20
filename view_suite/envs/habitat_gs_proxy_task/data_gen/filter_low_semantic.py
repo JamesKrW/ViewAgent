@@ -75,7 +75,8 @@ Answer with exactly one word: KEEP or FILTER."""
 
 
 def judge_image_cli(path: str, timeout: float = 180.0, max_retries: int = 3,
-                    judge_model: Optional[str] = None) -> str:
+                    judge_model: Optional[str] = None,
+                    prompt: Optional[str] = None) -> str:
     """Judge one image by shelling out to VIEW_JUDGE_CMD. KEEP / FILTER / ERROR.
 
     Exists because an API key is not always available, while a site often provides a
@@ -98,7 +99,7 @@ def judge_image_cli(path: str, timeout: float = 180.0, max_retries: int = 3,
     cmd = _JUDGE_CMD.split() + ["-d", "-p"]
     if judge_model:
         cmd += ["-m", judge_model]
-    cmd += ["-g", os.path.abspath(path), GS_FILTER_PROMPT]
+    cmd += ["-g", os.path.abspath(path), prompt or GS_FILTER_PROMPT]
     for attempt in range(max_retries):
         try:
             out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -156,18 +157,27 @@ def run(
     suffix: str = "",
     dry_run: bool = False,
     judge_model: Optional[str] = None,
+    rubric: str = "gs",
 ) -> None:
+    # The rubric is corpus-specific. The gaussian-splatting one tells the judge to
+    # look for reconstruction smear and outdoor landmarks; aiming that at a synthetic
+    # indoor simulator is noise in the prompt, so AI2-THOR uses its own.
+    if rubric == "ai2thor":
+        from view_suite.envs.ai2thor_proxy_task.data_gen.filter_low_semantic import (
+            FILTER_PROMPT as _RUBRIC,
+        )
+    else:
+        _RUBRIC = GS_FILTER_PROMPT
     if backend == "cli":
         def judge(p):
-            return judge_image_cli(p, judge_model=judge_model)
+            return judge_image_cli(p, judge_model=judge_model, prompt=_RUBRIC)
         model = judge_model or f"{_JUDGE_CMD} default (UNPINNED -- not reproducible)"
     else:
         from view_suite.envs.ai2thor_proxy_task.data_gen import filter_low_semantic as _base
         model = model or _base._DEFAULT_MODEL[backend]
         auth = _base._openrouter_key() if backend == "openrouter" else _base._user_cert()
         def judge(p):  # noqa: E306
-            return _base.judge_image(p, model, auth, backend=backend,
-                                     prompt=GS_FILTER_PROMPT)
+            return _base.judge_image(p, model, auth, backend=backend, prompt=_RUBRIC)
 
     per_sample = _views_to_judge(data_root, suffix)
     uniq = sorted({p for ps in per_sample.values() for p in ps})
