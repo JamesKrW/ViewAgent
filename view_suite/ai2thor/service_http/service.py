@@ -59,6 +59,8 @@ def run(
     fieldOfView: float = 90.0,
     host: str = "0.0.0.0",
     port: int = 8765,
+    ssl_keyfile: Optional[str] = None,
+    ssl_certfile: Optional[str] = None,
     reload: bool = False,
     log_level: str = "info",
 ) -> None:
@@ -73,8 +75,14 @@ def run(
         width: Default image width (default: 512)
         height: Default image height (default: 512)
         fieldOfView: Default field of view in degrees (default: 90.0)
-        host: Host address to bind to (default: "0.0.0.0" for all interfaces)
+        host: Host address to bind to (default: "0.0.0.0" for all interfaces).
+            Use "::" to also accept IPv6.
         port: Port number to listen on (default: 8765)
+        ssl_keyfile / ssl_certfile: serve HTTPS instead of HTTP. Useful when the
+            client is not on this machine. A self-signed pair works, provided the
+            client skips verification. A cross-region caller needs this for a second
+            reason: plain HTTP through the egress proxy truncates large responses,
+            and a batch of 512x512 PNGs is large.
         reload: Enable auto-reload for development (default: False)
         log_level: Logging level (default: "info")
 
@@ -118,6 +126,7 @@ def run(
     print(f"  fieldOfView:         {fieldOfView}")
     print(f"  max_inflight:        {max_inflight_env} (from env UNIFIED_MAX_INFLIGHT)")
     print(f"  api_key:             {'✓ set' if api_key_set else '✗ not set'}")
+    print(f"  scheme:              {'https' if ssl_certfile else 'http'}")
     print("=" * 60)
 
     uvicorn.run(
@@ -126,6 +135,8 @@ def run(
         port=port,
         reload=reload,
         log_level=log_level,
+        ssl_keyfile=ssl_keyfile,
+        ssl_certfile=ssl_certfile,
     )
 
 if __name__ == "__main__":

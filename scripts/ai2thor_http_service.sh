@@ -21,6 +21,13 @@ GPU_IDS=${4:-"0"}
 # Resolve repo root (env var wins; else two levels up from this script).
 VIEWSUITE_ROOT="${VIEWSUITE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
+# Bind address and TLS, same knobs as the ScanNet wrapper. A cross-region caller
+# needs both: "::" so IPv6 clients can connect, and TLS because plain HTTP through an
+# intermediate proxy can truncate large responses.
+HOST=${HOST:-0.0.0.0}
+SSL_KEYFILE=${SSL_KEYFILE:-}
+SSL_CERTFILE=${SSL_CERTFILE:-}
+
 # Environment variables for concurrency control
 export UNIFIED_MAX_INFLIGHT=${UNIFIED_MAX_INFLIGHT:-256}
 export UNIFIED_ADMIT_TIMEOUT=${UNIFIED_ADMIT_TIMEOUT:-2.0}
@@ -71,20 +78,30 @@ echo "Render Timeout:   $UNIFIED_RENDER_TIMEOUT s"
 echo "========================================="
 echo ""
 
+# The service imports view_suite.*; the ScanNet wrapper exports this and this one did
+# not, so it only ever worked when launched from a shell that happened to have it.
+export PYTHONPATH="${VIEWSUITE_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+
 ulimit -a || true
 
 # Build command
-CMD=(python "${VIEWSUITE_ROOT}/view_suite/ai2thor/service_http/service.py"
+# AI2-THOR and the service deps (uvicorn/fastapi) live in their own env, which is not
+# necessarily the one this script is launched from -- a bare `python` picked up base
+# and died on ModuleNotFoundError after the supervisor had already claimed the port.
+CMD=("${PY:-python}" "${VIEWSUITE_ROOT}/view_suite/ai2thor/service_http/service.py"
   --max_workers="$MAX_WORKERS"
   --port="$PORT"
   --platform=CloudRendering
   --agentMode=default
   --width=512
   --height=512
-  --fieldOfView=90.0)
+  --fieldOfView=90.0
+  --host="$HOST")
 
 # Add GPU IDs if specified
 [ -n "$GPU_IDS" ] && CMD+=(--gpu_ids="$GPU_IDS")
+[ -n "$SSL_KEYFILE" ]  && CMD+=(--ssl_keyfile="$SSL_KEYFILE")
+[ -n "$SSL_CERTFILE" ] && CMD+=(--ssl_certfile="$SSL_CERTFILE")
 
 echo ""
 echo "Starting AI2-THOR service..."

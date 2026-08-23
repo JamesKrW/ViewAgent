@@ -4,8 +4,8 @@
 envs:
   - name: Ai2ThorInteractiveViewPlanning
     data_source: ae
-    seed: [0, 1133, 1]
-    n_envs: 1133
+    seed: [0, 1236, 1]
+    n_envs: 1236
     max_turns: 10
     response_length_per_turn: 512
     config:
