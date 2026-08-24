@@ -97,8 +97,13 @@ general_overrides:
         position: 0.001        # default = baseline exact-match; override in run.sh
         angle: 0.001           # keep BELOW half-step (0.25m/15deg) to avoid merging adjacent cells
       atomize:                 # Idea-1: render intermediate views -> 100% single-action graph
-        enabled: false         # turn on via run.sh override
+        # ON by default, as for the other two corpora. It used to default off and be
+        # switched on per run; ai2thor and habitat_gs were then built from this file
+        # without the flag and trained for days on multi-action SFT data.
+        enabled: true
+        corpus: scannet
         client_url: null       # null -> falls back to $VIEWSUITE_ROOT/client_url_2.txt
+        corpus_dir: null       # ScanNet's step is uniform; no per-scene table needed
         step_translation: 0.5
         step_rotation: 30.0
         size: 512

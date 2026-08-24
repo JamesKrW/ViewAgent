@@ -530,24 +530,69 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
         atom_cfg = self.config.get("atomize", {}) or {}
         if atom_cfg.get("enabled"):
             from .utils.graph_atomize import atomize_graph
+            # What to do when atomize raises. Every option here is bad in a
+            # different way, and the one thing that is not negotiable is that the
+            # choice be visible: the previous behaviour degraded silently, and a
+            # degraded graph looks exactly like a healthy one downstream.
+            #   fail  (default) stop the iteration. Atomize raising almost always
+            #         means the render service is unreachable or answering wrongly,
+            #         and training on a corpus built from a broken renderer is the
+            #         failure that has already cost this project two multi-day runs.
+            #   prune drop every multi-action edge. Guarantees a single-action graph
+            #         but silently throws away most of the data -- ~60% of turns here
+            #         are multi-action.
+            #   keep  leave the collapsed "a | b | c" edges in place. Keeps all the
+            #         data and teaches the model to emit a whole plan in one turn,
+            #         which is the behaviour atomize exists to prevent.
+            on_failure = str(atom_cfg.get("on_failure", "fail")).lower()
+            if on_failure not in ("fail", "prune", "keep"):
+                raise ValueError(
+                    f"[atomize] on_failure must be fail|prune|keep, got {on_failure!r}")
             try:
                 stats = atomize_graph(self, graph, images_dir, atom_cfg)
                 logger.info(
                     "[InteractiveViewPlanningGraphBuilder] Atomize: %s", stats,
                 )
+                if not stats.get("rendered") and stats.get("multi_edges"):
+                    # Reached atomize, found work, rendered nothing: the pass
+                    # "succeeded" and did nothing. Same end state as a failure.
+                    logger.error(
+                        "[atomize] %d multi-action edges but 0 intermediate views "
+                        "rendered -- the graph is NOT atomized. Check the render "
+                        "service for this corpus.", stats["multi_edges"],
+                    )
             except Exception as e:
-                # Fail-safe: never crash the pipeline. Still guarantee a
-                # single-action graph by pruning any multi-action edges.
                 logger.error(
-                    "[atomize] FAILED (%s) -> pruning multi-action edges as fallback",
-                    e, exc_info=True,
+                    "[atomize] FAILED (%s) -- on_failure=%s", e, on_failure,
+                    exc_info=True,
                 )
-                pruned = 0
-                for u, v, eid, data in list(graph._g.edges(data=True, keys=True)):
-                    if len([a for a in data["obs_str"].split("|") if a.strip()]) > 1:
-                        graph._g.remove_edge(u, v, key=eid)
-                        pruned += 1
-                logger.info("[atomize] fallback pruned %d multi-action edges", pruned)
+                if on_failure == "fail":
+                    raise RuntimeError(
+                        "[atomize] failed and on_failure=fail. The SFT graph would "
+                        "be built without intermediate views, which trains the model "
+                        "to emit open-loop multi-action plans. Fix the renderer, or "
+                        "set atomize.on_failure=prune|keep to continue anyway."
+                    ) from e
+                if on_failure == "prune":
+                    pruned = 0
+                    for u, v, eid, data in list(graph._g.edges(data=True, keys=True)):
+                        if len([a for a in data["obs_str"].split("|") if a.strip()]) > 1:
+                            graph._g.remove_edge(u, v, key=eid)
+                            pruned += 1
+                    logger.warning(
+                        "[atomize] DEGRADED: pruned %d multi-action edges. The graph "
+                        "is single-action but most trajectory data was discarded.",
+                        pruned,
+                    )
+                else:  # keep
+                    kept = sum(
+                        1 for _, _, _, d in graph._g.edges(data=True, keys=True)
+                        if len([a for a in d["obs_str"].split("|") if a.strip()]) > 1)
+                    logger.warning(
+                        "[atomize] DEGRADED: kept %d multi-action edges as-is. This "
+                        "SFT data teaches whole-plan-in-one-turn behaviour; treat any "
+                        "resulting run as not-atomized.", kept,
+                    )
         else:
             n_virt, n_merged = self._refine_graph(graph)
             if n_virt:

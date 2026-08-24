@@ -99,6 +99,23 @@ general_overrides:
       filter:
         void_threshold: 0.7
         std_threshold: 10.0
+      atomize:                 # render intermediate views -> 100% single-action graph
+        # ON by default. Without it the builder collapses multi-action turns back
+        # into "a | b | c" edges, and the SFT data then teaches the model to emit a
+        # whole open-loop plan in one turn -- measured on this corpus: ~60% of
+        # episodes answered after a single reply, never looking at an intermediate
+        # frame, and ending up further from the target than not moving at all.
+        enabled: true
+        corpus: habitat_gs
+        client_url: null       # null -> $VIEWSUITE_ROOT/client_url_habitat_gs.txt
+        corpus_dir: ${oc.env:VIEWSUITE_ROOT}/data/habitat_gs
+        step_translation: 0.5
+        # Habitat-GS scales the step per scene (0.25-8 m); corpus_dir supplies the
+        # real value per scene and this global is only the fallback.
+        step_rotation: 30.0
+        size: 512
+        render_chunk: 32
+        max_scene_concurrency: 8
     generators:
       - action_gen
       - path_to_view

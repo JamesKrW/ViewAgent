@@ -58,6 +58,17 @@ URL_FILE="$VIEWSUITE_ROOT/client_url_${CORPUS}.txt"
 EPISODES="${PREFLIGHT_EPISODES:-3}"
 PY="${PY:-$HOME/miniconda3/envs/habitat-gs/bin/python}"
 
+# Fail on the interpreter before failing inside a heredoc. A bare ModuleNotFoundError
+# traceback out of stage 1 reads like a corpus problem; it is usually PY pointing at a
+# base conda that never had numpy.
+"$PY" -c 'import numpy, PIL' 2>/dev/null || {
+    echo "[preflight][FATAL] PY=$PY cannot import numpy/PIL."
+    echo "  Point PY at the env that owns this corpus' renderer and env classes,"
+    echo "  e.g. PY=\$HOME/miniconda3/envs/habitat-gs/bin/python (habitat_gs)"
+    echo "    or PY=\$HOME/miniconda3/envs/viewsuite/bin/python  (ai2thor)."
+    exit 1
+}
+
 echo "=============================================================="
 echo " preflight: $CORPUS"
 echo "   data     $DATA_DIR"
