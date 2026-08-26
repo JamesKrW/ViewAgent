@@ -89,10 +89,9 @@ class GenConfig:
     # initial pose unchanged would score. The env's success test is
     # (pos_err <= 1.0 x step) AND (ang_err <= 30), so these must be at least that wide
     # -- and the position one is deliberately wider, because equal thresholds leave
-    # samples sitting exactly on the success line: at 1.0 the corpus ended up with 129
-***REMOVED***
-    # samples that a do-nothing agent solved, outscoring the untrained model, with
-    # having a final error identical to the initial offset. It never moved.
+    # samples sitting exactly on the success line: at 1.0 a do-nothing agent solved
+    # enough of the corpus to outscore the untrained model, and every one of its
+    # "successes" had a final error identical to the initial offset. It never moved.
     #
     # The angle needs an epsilon rather than a wider bound: a clean 30-degree rotation
     # comes back as 30.00000000000003, so `<= 30.0` let 39 pure-rotation samples --

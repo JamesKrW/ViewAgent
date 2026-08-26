@@ -108,9 +108,9 @@ class GenConfig:
     # Must be WIDER than the env's success test (0.5 m / 30 deg), not equal to it.
     # Equal thresholds leave samples sitting exactly on the success line, and the
     # generator's targets cluster there: the released corpus has a median init->target
-    # distance of exactly 0.50 m (one step) and a median rotation of exactly 30 deg
-***REMOVED***
-    # (one turn), so a sizeable fraction of every split is solved by submitting the
+    # distance of exactly one step and a median rotation of exactly one turn, so a
+    # sizeable fraction of every split is solved by submitting the initial pose
+    # unchanged -- outscoring the untrained model.
     #
     # The epsilon matters independently: a clean 30-degree rotation comes back as
     # 30.00000000000003, so `<= 30.0` lets pure-rotation targets straight through.
