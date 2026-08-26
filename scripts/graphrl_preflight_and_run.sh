@@ -3,28 +3,19 @@
 # Preflight the corpus and the renderer, then start GraphRL -- in that order,
 # in one process, so training cannot begin against a setup that is already broken.
 #
-# This exists because a Habitat-GS run burned four iterations before anyone looked.
-# The scheduler said the job was healthy, /health answered ok, and IVP read exactly
-# 0.000 -- which is also what an honest zero looks like. What actually happened was
-# that iter0's renderer never answered: `val-aux/num_turns/max` was 1, so every IVP
-# episode died on its first render call, and the SFT distilled from those dead
-# trajectories seeded every iteration after it. The signal that exposed it costs one
-# number, and nothing was checking it.
+# A broken setup does not announce itself: the service answers 200 on internal
+# errors, and IVP reading 0.000 looks the same whether the renderer is dead or the
+# model is bad. Each stage checks one thing that is otherwise invisible until the
+# metrics come back wrong.
 #
-# So each stage below is a failure that has already happened here, turned into a gate:
-#
-#   1. data      -- splits present, row counts, scene-disjoint, no do-nothing wins,
-#                   every referenced image on disk, n_envs matching the row count
-#   2. transport -- the URL in the client_url file is the one that works. An http://
-#                   file against an https-only service gives httpx.ReadError, which
-#                   surfaces as env_error on every episode, which looks like a model
-#                   that cannot do the task
-#   3. pixels    -- real renders, checked for variance. The service answers 200 on
-#                   internal errors, so a reachable-but-broken renderer passes a
-#                   health check and then returns black frames for hours
-#   4. episodes  -- drive the real env class through several multi-turn episodes.
-#                   This is the num_turns/max == 1 check, done before training
-#                   rather than discovered in W&B two days later
+#   1. data      -- splits, row counts, scene-disjoint, no do-nothing wins,
+#                   referenced images on disk, n_envs matching the row count
+#   2. transport -- the client_url file resolves; a wrong scheme is env_error on
+#                   every episode
+#   3. pixels    -- real renders, checked for variance
+#   4. episodes  -- the real env class through multi-turn episodes; turns must
+#                   advance past the first
+#   5. atomize   -- the SFT-side render path, which uses a different renderer class
 #
 # Usage:
 #   bash scripts/graphrl_preflight_and_run.sh habitat_gs
@@ -45,22 +36,25 @@ CORPUS="${1:-}"
 [ -n "$CORPUS" ] || { echo "usage: $0 <habitat_gs|ai2thor> [extra run.sh args]"; exit 2; }
 shift || true
 
+# ViewSuite's data dir and validation split name differ from the other two.
 case "$CORPUS" in
-  habitat_gs) EXAMPLE=habitat_gs_interactive_view_planning; ENV_CLASS=HabitatGSInteractiveViewPlanning ;;
-  ai2thor)    EXAMPLE=ai2thor_interactive_view_planning;    ENV_CLASS=Ai2ThorInteractiveViewPlanning ;;
-  *) echo "unknown corpus: $CORPUS (expected habitat_gs or ai2thor)"; exit 2 ;;
+  habitat_gs) EXAMPLE=habitat_gs_interactive_view_planning; ENV_CLASS=HabitatGSInteractiveViewPlanning
+              DATA_SUBDIR=habitat_gs; VAL_SPLIT=eval; URL_NAME=client_url_habitat_gs.txt ;;
+  ai2thor)    EXAMPLE=ai2thor_interactive_view_planning;    ENV_CLASS=Ai2ThorInteractiveViewPlanning
+              DATA_SUBDIR=ai2thor;    VAL_SPLIT=eval; URL_NAME=client_url_ai2thor.txt ;;
+  viewsuite)  EXAMPLE=viewsuite_interactive_view_planning;  ENV_CLASS=InteractiveViewPlanning
+              DATA_SUBDIR=viewsuite_15k; VAL_SPLIT=dev;  URL_NAME=client_url.txt ;;
+  *) echo "unknown corpus: $CORPUS (expected habitat_gs, ai2thor or viewsuite)"; exit 2 ;;
 esac
 
 : "${VIEWSUITE_ROOT:?VIEWSUITE_ROOT must be exported}"
-DATA_DIR="$VIEWSUITE_ROOT/data/$CORPUS"
+DATA_DIR="$VIEWSUITE_ROOT/data/$DATA_SUBDIR"
 EXAMPLE_DIR="$VIEWSUITE_ROOT/GraphRL/examples/viewsuite/$EXAMPLE"
-URL_FILE="$VIEWSUITE_ROOT/client_url_${CORPUS}.txt"
+URL_FILE="$VIEWSUITE_ROOT/$URL_NAME"
 EPISODES="${PREFLIGHT_EPISODES:-3}"
 PY="${PY:-$HOME/miniconda3/envs/habitat-gs/bin/python}"
 
-# Fail on the interpreter before failing inside a heredoc. A bare ModuleNotFoundError
-# traceback out of stage 1 reads like a corpus problem; it is usually PY pointing at a
-# base conda that never had numpy.
+# Check the interpreter before failing inside a heredoc.
 "$PY" -c 'import numpy, PIL' 2>/dev/null || {
     echo "[preflight][FATAL] PY=$PY cannot import numpy/PIL."
     echo "  Point PY at the env that owns this corpus' renderer and env classes,"
@@ -77,18 +71,15 @@ echo "   url file $URL_FILE"
 echo "=============================================================="
 
 # ---- 1) Data ------------------------------------------------------------------
-# Row counts, scene disjointness and "can a do-nothing agent win?" all in one pass.
-# The last one is the reason this corpus was regenerated: the degeneracy filter used
-# the same threshold as the success test, so samples that barely escaped filtering
-# landed exactly on the success line and submitting the initial pose unchanged scored
-# against a do-nothing baseline.
-"$PY" - "$DATA_DIR" "$EXAMPLE_DIR" <<'PY' || { echo "[preflight][FATAL] data check failed"; exit 1; }
+# Row counts, scene disjointness, and whether a do-nothing agent can win.
+"$PY" - "$DATA_DIR" "$EXAMPLE_DIR" "$VAL_SPLIT" "$CORPUS" <<'PY' || { echo "[preflight][FATAL] data check failed"; exit 1; }
 import json, os, sys
 import numpy as np
 
-data_dir, example_dir = sys.argv[1], sys.argv[2]
+data_dir, example_dir, val_split, corpus = (sys.argv[1], sys.argv[2],
+                                            sys.argv[3], sys.argv[4])
 TASKS = ("interactive_view_planning", "path_to_view", "view_to_path")
-SPLITS = ("train", "eval", "test")
+SPLITS = ("train", val_split, "test")
 bad = []
 
 def pose_delta(a, b):
@@ -109,7 +100,7 @@ for task in TASKS:
         if not rows:
             bad.append(f"empty split: {task}_{split}.jsonl")
 
-# Scene disjointness -- a scene in both train and test makes every number meaningless.
+# A scene in both train and test makes every number meaningless.
 for task, per_split in scenes.items():
     for a in SPLITS:
         for b in SPLITS:
@@ -118,13 +109,13 @@ for task, per_split in scenes.items():
                 if overlap:
                     bad.append(f"{task}: {len(overlap)} scenes in both {a} and {b}")
 
-# The three tasks are views of the same samples; a mismatch means a partial regen.
+# The three tasks share samples; a mismatch means a partial regen.
 for split in SPLITS:
     sizes = {t: counts.get((t, split)) for t in TASKS}
     if len({v for v in sizes.values() if v is not None}) > 1:
         bad.append(f"{split}: task row counts disagree {sizes}")
 
-# Do-nothing wins, judged by each sample's own tolerance (it follows the step now).
+# Do-nothing wins, judged by each sample's own tolerance.
 for split in SPLITS:
     p = os.path.join(data_dir, f"interactive_view_planning_{split}.jsonl")
     if not os.path.isfile(p):
@@ -142,11 +133,15 @@ for split in SPLITS:
             noop += 1
     print(f"  {'IVP ' + split:20s} {len(rows):5d} rows   do-nothing wins: {noop}")
     if noop:
-        bad.append(f"{split}: {noop} samples solvable without moving")
+        # ViewSuite is the published corpus; its known rate is left alone.
+        # The regenerated corpora must stay at zero.
+        if corpus == "viewsuite":
+            print(f"  [warn] {split}: {noop} samples solvable without moving "
+                  f"({100.0*noop/max(1,len(rows)):.1f}%) -- known, not regenerated")
+        else:
+            bad.append(f"{split}: {noop} samples solvable without moving")
 
-# Every referenced image must be on disk. resolve_rel_image resolves against the JSONL
-# directory, and a miss returns None, which only blows up one frame later as
-# "'NoneType' has no attribute 'size'" -- far from the cause.
+# resolve_rel_image returns None on a miss, which fails one frame later.
 missing = 0
 checked = 0
 for task in TASKS:
@@ -165,10 +160,10 @@ print(f"  {'images':20s} {checked:5d} referenced, {missing} missing")
 if missing:
     bad.append(f"{missing} referenced images not on disk")
 
-# n_envs must match the split: reset() does idx = seed % total_lines, so an
-# over-subscribed n_envs silently double-weights the first rows of the split.
+# reset() does idx = seed % total_lines, so a mismatch silently re-weights or
+# skips rows rather than erroring.
 import re
-for yml, split in (("train.yaml", "train"), ("val.yaml", "eval")):
+for yml, split in (("train.yaml", "train"), ("val.yaml", val_split)):
     path = os.path.join(example_dir, yml)
     if not os.path.isfile(path):
         bad.append(f"missing {yml}"); continue
@@ -208,8 +203,7 @@ if os.environ.get("RENDER_TLS_NO_VERIFY", "0").strip().lower() in ("1", "true", 
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
 
-# Use a scene and a pose the corpus actually contains, not a synthetic identity pose:
-# a made-up camera can legitimately see nothing, and then a blank frame proves nothing.
+# A pose the corpus contains: a made-up camera can legitimately see nothing.
 row = None
 for split in ("eval", "test", "train"):
     p = os.path.join(data_dir, f"interactive_view_planning_{split}.jsonl")
@@ -222,9 +216,7 @@ if row is None:
 
 scene = row["scene_id"]
 view = row["image_detail"]["init_view"]
-# The two services take different task schemas, and neither rejects the other's --
-# AI2-THOR answers a pose-less task with a transparent frame, which reads as a dead
-# renderer. Build the request the way the corpus' own env does.
+# Each service has its own task schema and neither rejects the other's.
 if corpus == "ai2thor":
     from view_suite.ai2thor.pose_utils import build_render_task
     task = build_render_task(np.array(view["c2w_extrinsics"], dtype=np.float64),
@@ -255,7 +247,7 @@ print(f"  render: {len(payload)}B, {n}/{n_ask} images, {time.time() - t:.1f}s, s
 if n != n_ask:
     sys.exit(1)
 
-# Variance, not just presence. A silent renderer returns a uniform frame.
+# Variance, not just presence.
 stds = []
 for part in payload.split(b"\x89PNG\r\n\x1a\n")[1:]:
     try:
@@ -273,11 +265,9 @@ print("  pixels OK")
 PY
 
 # ---- 4) Episodes ---------------------------------------------------------------
-# The gate the last run needed. Drive the real env class through multi-turn episodes
-# and require that turns actually advance: num_turns/max == 1 in W&B means every
-# episode died on its first render, and that is only visible here or two days too late.
+# Turns must advance past the first.
 PYTHONPATH="$VIEWSUITE_ROOT:${PYTHONPATH:-}" \
-"$PY" - "$DATA_DIR" "$URL_FILE" "$ENV_CLASS" "$EPISODES" <<'PY' || { echo "[preflight][FATAL] env smoke failed"; exit 1; }
+"$PY" - "$DATA_DIR" "$URL_FILE" "$ENV_CLASS" "$EPISODES" "$VAL_SPLIT" <<'PY' || { echo "[preflight][FATAL] env smoke failed"; exit 1; }
 import asyncio, importlib, os, sys
 
 data_dir, url_file, env_class, n_ep = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
@@ -287,11 +277,13 @@ MODULES = {
         "view_suite.envs.habitat_gs_proxy_task.interactive_view_planning",
     "Ai2ThorInteractiveViewPlanning":
         "view_suite.envs.ai2thor_proxy_task.interactive_view_planning",
+    "InteractiveViewPlanning":
+        "view_suite.envs.scannet_proxy_task.interactive_view_planning",
 }
 cls = getattr(importlib.import_module(MODULES[env_class]), env_class)
 
 cfg = {
-    "jsonl_path": os.path.join(data_dir, "interactive_view_planning_eval.jsonl"),
+    "jsonl_path": os.path.join(data_dir, f"interactive_view_planning_{sys.argv[5]}.jsonl"),
     "image_size": [512, 512],
     "format": "eval_mode",
     "use_example_in_sys_prompt": False,
@@ -308,8 +300,7 @@ async def one(seed):
     if not obs:
         return seed, 0, "reset returned no observation"
     turns = 0
-    # Two moves and a look: enough to prove the render loop survives past turn 1,
-    # which is the whole point. Success is not expected and not checked.
+    # Enough to prove the render loop survives past turn 1.
     for action in ("<answer>move_forward</answer>",
                    "<answer>turn_right</answer>",
                    "<answer>move_forward</answer>"):
@@ -341,6 +332,42 @@ async def main():
 
 sys.exit(asyncio.run(main()))
 PY
+
+# ---- 5) Atomize render path ----------------------------------------------------
+# Separate from stage 3: that one posts hand-built multipart, this one goes through
+# the corpus' UnifiedRender class. Agreeing with the service is not agreeing with
+# each other.
+PYTHONPATH="$VIEWSUITE_ROOT:$VIEWSUITE_ROOT/GraphRL:${PYTHONPATH:-}" \
+"$PY" - "$CORPUS" "$DATA_DIR" "$URL_FILE" <<'PYATOM' \
+  || { echo "[preflight][FATAL] atomize render path failed"; exit 1; }
+import asyncio, importlib.util, json, sys
+import numpy as np
+
+corpus, data_dir, url_file = sys.argv[1], sys.argv[2], sys.argv[3]
+spec = importlib.util.spec_from_file_location(
+    "ga", "GraphRL/graphrl/envs/viewsuite/viewsuite_interactive_view_planning/"
+          "utils/graph_atomize.py")
+GA = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(GA)
+
+adapter = GA._ADAPTERS["scannet" if corpus == "viewsuite" else corpus]
+with open(f"{data_dir}/interactive_view_planning_test.jsonl") as f:
+    row = json.loads(f.readline())
+c2w = np.array(row["image_detail"]["init_view"]["c2w_extrinsics"], dtype=np.float64)
+cfg = {"client_url": open(url_file).read().strip()}
+try:
+    imgs = asyncio.run(GA._render_scene(row["scene_id"], [c2w, c2w], cfg,
+                                        adapter.intrinsics(), 512, 32, adapter))
+except Exception as e:
+    print(f"  atomize renderer raised: {type(e).__name__}: {str(e)[:160]}")
+    sys.exit(1)
+ok = [i for i in imgs if i is not None]
+stds = [float(np.asarray(i.convert("RGB"), dtype=np.float32).std()) for i in ok]
+print(f"  atomize render: {len(ok)}/2 images, std={['%.1f' % v for v in stds]}")
+if len(ok) != 2 or max(stds, default=0.0) < 5.0:
+    sys.exit(1)
+print("  atomize path OK")
+PYATOM
 
 echo
 echo "=============================================================="

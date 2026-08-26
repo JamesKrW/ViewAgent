@@ -220,3 +220,14 @@ iteration_overrides:
           hf_save_freq: 200
           repo_id: null
           private: false
+
+# RL runs while it improves; SFT runs when it stops. Past best_metric_threshold
+# the schedule latches: no more SFT, run_patience ends the run instead.
+rl_schedule:
+  enabled: true
+  metric: val-aux/ae/traj_success/mean@1
+  min_delta: 0.03
+  iter_patience: 3         # validations without improvement -> SFT
+  run_patience: 8          # validations without improvement, latched -> end run
+  best_metric_threshold: 0.1
+  total_accumulated_rl_step: 801
