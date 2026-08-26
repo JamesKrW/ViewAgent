@@ -71,6 +71,21 @@ logger = logging.getLogger(__name__)
 # downstream phases and end-of-iter cleanup all see a uniform layout.
 
 
+# The trainer writes rl_schedule_state.json; the controller reads it between
+# iterations. See vagen/utils/run_schedule.py.
+_SCHEDULE_STATE = "rl_schedule_state.json"
+
+
+def _read_schedule_state(experiment_dir) -> dict:
+    """Best-effort read; missing or malformed means "no opinion"."""
+    import json as _json
+    try:
+        with open(Path(experiment_dir) / _SCHEDULE_STATE) as f:
+            return _json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
 class MaterializePhase:
     """A trivial phase: symlink ``source`` → ``dest``.
 
@@ -202,13 +217,42 @@ class GraphRLController:
         current_model = last_output.model_path if last_output else self.initial_model
         current_data: Dict[str, str] = last_output.data_paths if last_output else {}
 
+        sched_cfg = (self.raw_config.get("rl_schedule") or {})
+        sched_on = bool(sched_cfg.get("enabled"))
+        budget = int(sched_cfg.get("total_accumulated_rl_step", 0) or 0)
+
         for iter_idx in range(start_iter, num_iterations):
+            st = _read_schedule_state(self.experiment_dir) if sched_on else {}
+
+            if st.get("stop_run"):
+                logger.info("[rl_schedule] trainer signalled stop_run -- pipeline ends "
+                            f"after {iter_idx} iteration(s)")
+                break
+            if budget and int(st.get("steps_spent", 0)) >= budget:
+                logger.info(f"[rl_schedule] RL budget spent "
+                            f"({st.get('steps_spent')}/{budget}) -- pipeline ends")
+                break
+
             logger.info("=" * 60)
             logger.info(f"ITERATION {iter_idx}/{num_iterations - 1}")
             logger.info("=" * 60)
 
             iter_dir = self.experiment_dir / f"iter_{iter_idx:03d}"
             iter_config = self.iteration_overrides.get(iter_idx, {})
+
+            # The trainer is a separate process; it needs these to find the state.
+            os.environ["GRAPHRL_EXPERIMENT_DIR"] = str(self.experiment_dir)
+            os.environ["GRAPHRL_ITERATION"] = str(iter_idx)
+
+            # Latched: drop traj_to_sft and SFT. _build_phases symlinks
+            # rl_model -> sft_model when the SFT config is empty.
+            if sched_on and st.get("latched"):
+                logger.info("[rl_schedule] latched (best %.4f) -- skipping traj_to_sft "
+                            "and SFT for iteration %d; the view graph is not needed",
+                            float(st.get("best_score") or 0.0), iter_idx)
+                iter_config = dict(iter_config)
+                iter_config["traj_to_sft"] = None
+                iter_config["sft"] = None
 
             phases = self._build_phases(iter_idx, iter_dir, iter_config, current_model)
             phase_start = start_phase if iter_idx == start_iter else 0

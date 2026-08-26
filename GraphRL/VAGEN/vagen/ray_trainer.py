@@ -60,6 +60,7 @@ from verl.utils.seqlen_balancing import calculate_workload, get_seqlen_balanced_
 from verl.utils.torch_functional import masked_mean
 from vagen.utils.image_dump_actor import ImageDumpActor
 from vagen.utils.best_val import BestValTracker
+from vagen.utils.run_schedule import RunSchedule
 from vagen.utils.upload_hugging_face import HFUploadManager
 from vagen.utils.image_validation_logger import ValidationGenerationsLogger
 from vagen.utils.concat_val_multi_turn import concat_val_multi_turn
@@ -415,6 +416,13 @@ class RayPPOTrainer:
 
         # Best-validation checkpointing (see vagen/utils/best_val.py).
         self._best_val_tracker = BestValTracker(config)
+        # Run-scoped schedule; BestValTracker above is per-iteration.
+        _exp_root = os.environ.get("GRAPHRL_EXPERIMENT_DIR") or os.path.dirname(
+            os.path.dirname(os.path.dirname(config.trainer.default_local_dir)))
+        self._run_schedule = RunSchedule(
+            config, _exp_root,
+            iteration=int(os.environ.get("GRAPHRL_ITERATION", "0")))
+        self._schedule_stop = False
 
         # if ref_in_actor is True, the reference policy will be actor without lora applied
         self.ref_in_actor = (
@@ -1336,7 +1344,9 @@ class RayPPOTrainer:
                     num_traj_per_sample = self.config.actor_rollout_ref.rollout.n
                     self._assign_group_and_traj_idx(gen_batch_output, num_traj_per_sample)
 
-                is_last_step = self.global_steps >= self.total_training_steps
+                # _schedule_stop is sticky, or this line would discard it.
+                is_last_step = (self.global_steps >= self.total_training_steps
+                                or self._schedule_stop)
                 with marked_timer("step", timing_raw):
                     # generate a batch
                     with marked_timer("gen", timing_raw, color="red"):
@@ -1578,6 +1588,19 @@ class RayPPOTrainer:
                             actor_rollout_wg=self.actor_rollout_wg,
                             hf_upload_manager=self._hf_upload_manager,
                         )
+                        # No-op unless rl_schedule.enabled.
+                        _dec = self._run_schedule.observe(
+                            val_metrics=val_metrics, global_steps=self.global_steps)
+                        if _dec.get("is_best"):
+                            self._run_schedule.save_best_checkpoint(
+                                actor_rollout_wg=self.actor_rollout_wg,
+                                global_steps=self.global_steps,
+                                score=_dec["score"])
+                        if _dec.get("stop_run") or _dec.get("switch_to_sft"):
+                            # Normal exit path, so the epilogue still runs.
+                            self._schedule_stop = True
+                            is_last_step = True
+                            last_val_metrics = val_metrics
                     metrics.update(val_metrics)
 
                 # Check if the ESI (Elastic Server Instance)/training plan is close to expiration.

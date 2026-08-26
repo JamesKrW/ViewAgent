@@ -46,19 +46,11 @@ _ACTION_TO_CODE = {
 }
 
 
-# ── Per-corpus adapters ────────────────────────────────────────────────────
-# Atomizing means replaying single actions from a node's pose and rendering where
-# they land, so it has to reproduce *that corpus'* camera and *that corpus'* render
-# protocol. Getting either wrong is silent: the poses are plausible, the images
-# render, and the SFT data teaches the model a camera it does not have.
-#
-# The three differ in every part of this:
-#   scannet     Z-up world, ScanNet ViewManipulator, cam_param render tasks
-#   habitat_gs  Y-up world, yaw-only body + pitching sensor, cam_param tasks, and
-#               a translation step that is PER SCENE (0.25-8 m), not global
-#   ai2thor     Unity pose dicts (no se3 accessors) and a pose{position,rotation}
-#               render task -- a cam_param task gets a transparent frame back, HTTP
-#               200 and all, which is indistinguishable from a dead renderer
+# Per-corpus adapters. Each corpus has its own camera convention, render task
+# schema and intrinsics; mismatches render successfully but wrongly.
+#   scannet     Z-up, cam_param tasks
+#   habitat_gs  Y-up, yaw-only body + pitching sensor, per-scene step, cam_param
+#   ai2thor     Unity pose dicts, pose{position,rotation} tasks
 
 
 class _ScanNetAdapter:
@@ -67,8 +59,7 @@ class _ScanNetAdapter:
     @staticmethod
     def manipulator(src_se3, step_t, step_r):
         from view_suite.scannet.view_manipulator import ViewManipulator
-        # Match gym_scannet_tool_env exactly so intermediate poses reproduce what
-        # the agent actually traversed.
+        # Match gym_scannet_tool_env.
         vm = ViewManipulator(
             step_translation=step_t, step_rotation_deg=step_r,
             world_up_axis="Z", is_discrete=True,
@@ -115,7 +106,7 @@ class _HabitatGSAdapter(_ScanNetAdapter):
 
     @staticmethod
     def intrinsics():
-        # The corpus is rendered at 90 deg FOV / 512 px, not ScanNet's calibration.
+        # 90 deg FOV / 512 px, not ScanNet's calibration.
         from view_suite.ai2thor.pose_utils import intrinsics_from_fov
         return _K3(intrinsics_from_fov(512, 512, 90.0))
 
@@ -124,8 +115,8 @@ class _HabitatGSAdapter(_ScanNetAdapter):
         from view_suite.habitat_gs.habitat_gs_unified_renderer import (
             HabitatGSUnifiedRender)
         return HabitatGSUnifiedRender(
-            render_backend="client", client_url=cfg["client_url"],
-            scene_id=scene_id)
+            client_url=cfg["client_url"],
+            client_origin=cfg.get("client_origin"), scene_id=scene_id)
 
 
 class _Ai2ThorAdapter:
@@ -135,8 +126,7 @@ class _Ai2ThorAdapter:
     def manipulator(src_se3, step_t, step_r):
         from view_suite.ai2thor.view_manipulator import ViewManipulator
         from view_suite.ai2thor.pose_utils import c2w_to_unity_pose
-        # The AI2-THOR manipulator speaks Unity pose dicts and has no se3
-        # accessors, so convert on the way in and out.
+        # Unity pose dicts in and out; no se3 accessors.
         c2w = _se3_to_c2w(src_se3)
         vm = ViewManipulator(
             init_pose=c2w_to_unity_pose(c2w),
@@ -154,8 +144,8 @@ class _Ai2ThorAdapter:
     def renderer(scene_id, cfg):
         from view_suite.ai2thor.ai2thor_unified_renderer import AI2ThorUnifiedRender
         return AI2ThorUnifiedRender(
-            render_backend="client", client_url=cfg["client_url"],
-            scene_id=scene_id)
+            client_url=cfg["client_url"],
+            client_origin=cfg.get("client_origin"), scene_id=scene_id)
 
     @staticmethod
     def tasks(c2w_list, K, size):
@@ -177,8 +167,7 @@ _ADAPTERS = {"scannet": _ScanNetAdapter,
 
 
 def _se3_to_c2w(se3):
-    """se3 (tx,ty,tz,rx,ry,rz degrees) -> 4x4 c2w, via the ScanNet manipulator's
-    own convention so the round-trip matches what produced the pose."""
+    """se3 (tx,ty,tz,rx,ry,rz degrees) -> 4x4 c2w."""
     from view_suite.scannet.view_manipulator import ViewManipulator
     vm = ViewManipulator(world_up_axis="Z", is_discrete=True)
     vm.set_se3(np.asarray(se3, dtype=np.float64), degrees=True)
@@ -193,13 +182,7 @@ def _c2w_to_se3(c2w):
 
 
 def _scene_step_map(corpus_dir: Optional[str]) -> Dict[str, Tuple[float, float]]:
-    """scene_id -> (step_translation_m, step_rotation_deg) read from the corpus.
-
-    Habitat-GS scales the move step per scene, from 0.25 m in a room to 8 m in a
-    plaza. Replaying a 0.25 m scene with the global 0.5 m default puts every
-    intermediate pose in the wrong place, and the render succeeds anyway -- the
-    SFT data would then teach a step size the env does not use.
-    """
+    """scene_id -> (step_translation_m, step_rotation_deg), for per-scene steps."""
     out: Dict[str, Tuple[float, float]] = {}
     if not corpus_dir:
         return out
@@ -369,7 +352,6 @@ def atomize_graph(builder, graph, images_dir, cfg: Dict[str, Any]) -> Dict[str, 
     adapter = _ADAPTERS[corpus]
     step_t = float(cfg.get("step_translation", 0.5))
     step_r = float(cfg.get("step_rotation", 30.0))
-    # Per-scene steps override the global one where the corpus defines them.
     scene_steps = _scene_step_map(cfg.get("corpus_dir"))
     size = int(cfg.get("size", 512))
     chunk = int(cfg.get("render_chunk", 32))

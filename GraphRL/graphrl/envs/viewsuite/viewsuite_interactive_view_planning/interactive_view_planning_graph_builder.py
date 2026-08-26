@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 
 # ── regex patterns ────────────────────────────────────────────────────────────
 
+# Every env writes f"You're in the scene {scene_id}." into the first observation,
+# so read the sentence rather than matching each corpus' naming.
+_SCENE_LINE_RE = re.compile(r"You're in the scene\s+([^\s.]+)\s*\.")
+
+# Fallbacks for rollouts recorded before the sentence was standardised.
 _SCENE_ID_RE = re.compile(r"scene(\d+_\d+)")          # ScanNet, e.g. scene0353_02
 _THOR_SCENE_ID_RE = re.compile(r"\b(FloorPlan\d+)\b")  # AI2-THOR, e.g. FloorPlan2
 _POSE_RE = re.compile(
@@ -383,17 +388,28 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
 
         # Extract scene_id from the first user message. Handles both ScanNet
         # ("You're in the scene scene0353_02.") and AI2-THOR ("... FloorPlan2.").
-        scene_id = "unknown"
+        scene_id = None
         for msg in messages:
             if msg["role"] == "user":
-                m = _SCENE_ID_RE.search(msg["content"])
+                m = _SCENE_LINE_RE.search(msg["content"])
                 if m:
-                    scene_id = f"scene{m.group(1)}"
-                else:
-                    m2 = _THOR_SCENE_ID_RE.search(msg["content"])
-                    if m2:
-                        scene_id = m2.group(1)
+                    scene_id = m.group(1)
+                else:  # pre-standardisation rollouts
+                    m = _SCENE_ID_RE.search(msg["content"])
+                    if m:
+                        scene_id = f"scene{m.group(1)}"
+                    else:
+                        m2 = _THOR_SCENE_ID_RE.search(msg["content"])
+                        if m2:
+                            scene_id = m2.group(1)
                 break
+        if scene_id is None:
+            # Unset, not a placeholder: downstream checks test for emptiness.
+            logger.warning(
+                "[graph] no scene id in the first user message of %s step %d line %d; "
+                "this episode's edges cannot be atomized and will be dropped",
+                rollout_dir, step_idx, line_idx,
+            )
 
         # First pass: collect all states (pose + image) and actions
         states: List[Tuple[Dict[str, float], Optional[str]]] = []  # (pose, image_path)
