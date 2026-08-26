@@ -31,12 +31,17 @@ class RunSchedule:
 
     def __init__(self, config, experiment_root: str, iteration: int):
         cfg = dict(_DEFAULTS)
-        raw = config.trainer.get("rl_schedule", None)
+        # The controller writes this next to the experiment; verl's trainer config is
+        # a struct, so the schedule cannot be injected as a hydra override.
+        raw = None
+        cfg_path = os.path.join(experiment_root, "rl_schedule_config.json")
+        try:
+            with open(cfg_path) as f:
+                raw = json.load(f)
+        except (OSError, ValueError):
+            raw = config.trainer.get("rl_schedule", None)
         if raw is None:
-            # The block also exists at the pipeline top level, where the controller
-            # reads it. That copy never reaches verl's config tree, so a schedule
-            # configured only there would silently do nothing.
-            print("[RunSchedule] no trainer.rl_schedule; schedule disabled")
+            print(f"[RunSchedule] no schedule config at {cfg_path}; disabled")
         cfg.update(dict(raw or {}))
         self.cfg = cfg
         self.enabled = bool(cfg["enabled"])
