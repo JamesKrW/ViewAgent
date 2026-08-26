@@ -60,3 +60,8 @@ AGENT.md
 # VLM screen artefacts for the regenerated corpora
 /ai2thor_filter_review_v2/
 /gs_filter_review_v2/
+
+# Rebuttal / result artefacts live outside the repo (../rebuttal), so unpublished
+# numbers are not carried in public history.
+/analysis/
+RESULTS.md

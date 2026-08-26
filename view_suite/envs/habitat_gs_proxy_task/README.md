@@ -92,8 +92,8 @@ notice; the run is recorded either way in `_filter_provenance.json`.
 | eval | 16 | 257 |
 | test | 19 (the corpus's own `val/`) | 288 |
 
-3096 samples generated, 1874 kept: the screen judged 15480 views and rejected 2326
-(15.0%), which drops 39.5% of samples because a sample needs all five of its views.
+3096 samples generated, 1874 kept: the screen judged 15480 views and rejected 2326,
+which drops a substantial fraction of samples because a sample needs all five of its views.
 Hand-checking 12 rejected and 12 kept: no false positives, and 2 of the 12 kept were
 marginal (a sky-and-grass frame with no landmark; a frame with a black hole where
 gaussians are missing), so it under-filters slightly at the margin.
@@ -207,11 +207,9 @@ And **read the whole metric key**. IVP is `val-aux/ae/...`; the smoke logs
 read as an IVP one here and turned into a six-fold discrepancy that did not exist. The
 actual figures line up:
 
-| | training val (n=16) | eval harness |
-|---|---|---|
-| IVP | `val-aux/ae` 0.1875 | 0.062 on the same 16 episodes, 0.059 on all 288 |
-| P2V | `val-aux/path_to_view` 0.375 | 0.361 on 288 |
-| V2P | `val-aux/view_to_path` 0.375 | 0.299 on 288 |
+Read `val-aux/ae` for IVP, `val-aux/path_to_view` and `val-aux/view_to_path` for the
+other two. The training-time validation split is much smaller than the eval harness's,
+so the two disagree by more than the metric definition alone would suggest.
 
 Three successes against one out of sixteen is where IVP sits; that is sampling noise at
 this n, not a broken metric. `examples/evaluation/eval_ivp_valsmoke_replica.yaml`
