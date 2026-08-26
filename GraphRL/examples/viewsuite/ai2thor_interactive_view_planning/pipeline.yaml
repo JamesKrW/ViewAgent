@@ -15,7 +15,7 @@ hydra:
   job:
     chdir: false
 
-project_name: viewagent_atomize
+project_name: viewagent
 experiment_name: ai2thor_interactive_view_planning
 experiment_dir: exps/${project_name}/${experiment_name}
 initial_model_path: Qwen/Qwen2.5-VL-7B-Instruct
