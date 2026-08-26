@@ -243,6 +243,12 @@ class GraphRLController:
             # The trainer is a separate process; it needs these to find the state.
             os.environ["GRAPHRL_EXPERIMENT_DIR"] = str(self.experiment_dir)
             os.environ["GRAPHRL_ITERATION"] = str(iter_idx)
+            # Hand the schedule to the trainer through a file. verl's trainer config
+            # is a struct, so a new key cannot be injected via hydra overrides.
+            if sched_on:
+                import json as _json
+                with open(Path(self.experiment_dir) / "rl_schedule_config.json", "w") as f:
+                    _json.dump(dict(sched_cfg), f, indent=2, sort_keys=True)
 
             # Latched: drop traj_to_sft and SFT. _build_phases symlinks
             # rl_model -> sft_model when the SFT config is empty.

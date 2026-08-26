@@ -75,16 +75,6 @@ general_overrides:
             optimizer_offload: true
         ppo_micro_batch_size_per_gpu: 2
       trainer:
-        rl_schedule:
-          # The trainer reads config.trainer.rl_schedule; the top-level block the
-          # controller reads does not reach verl's config tree.
-          enabled: true
-          metric: val-aux/ae/traj_success/mean@1
-          min_delta: 0.03
-          iter_patience: 3
-          run_patience: 8
-          best_metric_threshold: 0.1
-          total_accumulated_rl_step: 801
         n_gpus_per_node: 8
         save_freq: 20
         test_freq: 20
