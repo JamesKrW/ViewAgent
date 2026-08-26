@@ -31,7 +31,13 @@ class RunSchedule:
 
     def __init__(self, config, experiment_root: str, iteration: int):
         cfg = dict(_DEFAULTS)
-        cfg.update(dict((config.trainer.get("rl_schedule", None) or {})))
+        raw = config.trainer.get("rl_schedule", None)
+        if raw is None:
+            # The block also exists at the pipeline top level, where the controller
+            # reads it. That copy never reaches verl's config tree, so a schedule
+            # configured only there would silently do nothing.
+            print("[RunSchedule] no trainer.rl_schedule; schedule disabled")
+        cfg.update(dict(raw or {}))
         self.cfg = cfg
         self.enabled = bool(cfg["enabled"])
         self.metric = str(cfg["metric"])
