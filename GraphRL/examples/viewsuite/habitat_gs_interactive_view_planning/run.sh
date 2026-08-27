@@ -47,8 +47,8 @@ python -m graphrl.main \
     general_overrides.rl.hydra_overrides.trainer.nnodes=1 \
     general_overrides.sft.n_gpus="${SFT_N_GPUS}" \
     'general_overrides.traj_to_sft.generators=[multi_turn_action_gen,view_difference,view_difference_mcq]' \
-    iteration_overrides.iter0.rl.training_steps=61 \
-    iteration_overrides.iter1.rl.training_steps=61 \
-    iteration_overrides.iter2.rl.training_steps=61 \
+    iteration_overrides.iter0.rl.training_steps=65 \
+    iteration_overrides.iter1.rl.training_steps=65 \
+    iteration_overrides.iter2.rl.training_steps=65 \
     +iteration_overrides.iter3.rl.hydra_overrides.trainer.log_image.enable=false \
     "$@" 2>&1 | tee "${LOG_FILE}"
