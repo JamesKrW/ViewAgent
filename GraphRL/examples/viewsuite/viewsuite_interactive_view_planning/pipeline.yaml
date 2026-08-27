@@ -195,19 +195,19 @@ general_overrides:
 iteration_overrides:
   iter0:
     rl:
-      training_steps: 61
+      training_steps: 65
     sft:
       hydra_overrides:
         num_train_epochs: 3.0
   iter1:
     rl:
-      training_steps: 61
+      training_steps: 65
     sft:
       hydra_overrides:
         num_train_epochs: 3.0
   iter2:
     rl:
-      training_steps: 61
+      training_steps: 65
     sft:
       hydra_overrides:
         num_train_epochs: 3.0
