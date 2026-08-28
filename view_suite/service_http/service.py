@@ -4,9 +4,8 @@ from __future__ import annotations
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from typing import List, Optional
 
-from fastapi import FastAPI, File, Form, UploadFile, Request, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
 from .handler import BaseHandler, MyHandler
@@ -22,9 +21,6 @@ ADMIT_TIMEOUT = float(os.getenv("UNIFIED_ADMIT_TIMEOUT", "2.0"))  # seconds
 # Response image encoding (keep it simple and consistent)
 IMAGE_FORMAT = os.getenv("UNIFIED_IMAGE_FORMAT", "PNG")
 IMAGE_MIME = os.getenv("UNIFIED_IMAGE_MIME", "image/png")
-
-# Global in-flight concurrency limiter (optional)
-_sem = asyncio.Semaphore(MAX_INFLIGHT) if MAX_INFLIGHT > 0 else None
 
 
 def _auth(request: Request) -> None:
@@ -47,6 +43,13 @@ def _auth(request: Request) -> None:
 def build_app(handler: BaseHandler) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        # asyncio synchronization primitives must be created from the event
+        # loop that will use them.  build_app() runs before uvicorn creates its
+        # serving loop; a module-global Semaphore can eventually remain bound
+        # to a stale loop and turn every request into HTTP 500.
+        app.state.request_semaphore = (
+            asyncio.Semaphore(MAX_INFLIGHT) if MAX_INFLIGHT > 0 else None
+        )
         try:
             yield
         finally:
@@ -68,8 +71,8 @@ def build_app(handler: BaseHandler) -> FastAPI:
     @app.post("/render")
     async def render(
         request: Request,
-        meta: Optional[str] = Form(default=None),                 # Optional JSON string field
-        images: Optional[List[UploadFile]] = File(default=None),  # Optional repeated file field
+        meta: str | None = Form(default=None),
+        images: list[UploadFile] | None = File(default=None),  # noqa: B008
     ):
         """
         Request (recommended):
@@ -85,11 +88,12 @@ def build_app(handler: BaseHandler) -> FastAPI:
         _auth(request)
 
         # Optional global concurrency control (limits in-flight requests)
+        semaphore = app.state.request_semaphore
         acquired = False
-        if _sem is not None:
+        if semaphore is not None:
             try:
                 # ADMIT_TIMEOUT bounds how long a request waits to be admitted.
-                await asyncio.wait_for(_sem.acquire(), timeout=ADMIT_TIMEOUT)
+                await asyncio.wait_for(semaphore.acquire(), timeout=ADMIT_TIMEOUT)
                 acquired = True
             except asyncio.TimeoutError:
                 raise HTTPException(status_code=503, detail="server busy")
@@ -116,8 +120,8 @@ def build_app(handler: BaseHandler) -> FastAPI:
                 media_type=f'multipart/mixed; boundary="{boundary}"',
             )
         finally:
-            if acquired and _sem is not None:
-                _sem.release()
+            if acquired and semaphore is not None:
+                semaphore.release()
 
     return app
 
