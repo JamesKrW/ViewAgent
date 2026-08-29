@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from graphrl.adaptive.model import write_snapshot_manifest
 from graphrl.adaptive.rollouts import durable_rollout_prefix
 from graphrl.adaptive.state import AdaptiveStateStore
 from graphrl.adaptive.viewsuite_traj_to_sft import (
@@ -384,3 +385,44 @@ def test_recovery_accepts_latched_checkpoint_without_rollouts(tmp_path):
     assert restored["latched"] is True
     assert restored["total_rl_steps"] == 60
     assert checkpoint.is_dir()
+
+
+def test_rl_state_ahead_rejects_model_only_best_snapshot(tmp_path):
+    controller = AdaptiveGraphRLController(_controller_config(tmp_path))
+    root_state = controller.store.initialize()
+    snapshot_rel = "adaptive_best_snapshots/round_000_step_000020"
+    root_state.update(
+        {
+            "phase": "rl",
+            "decision": "continue_rl",
+            "decision_step": 20,
+            "latched": True,
+            "steps_by_round": {"0": 20},
+            "total_rl_steps": 20,
+            "run_best": {
+                "score": 0.1,
+                "round": 0,
+                "step": 20,
+                "checkpoint": snapshot_rel,
+            },
+            "rounds": {
+                "0": {
+                    "best_score": 0.1,
+                    "best_step": 20,
+                    "checkpoint": snapshot_rel,
+                    "last_observed_step": 20,
+                }
+            },
+        }
+    )
+    controller.store.save(root_state)
+    snapshot = controller.experiment_dir / snapshot_rel
+    hf_model = snapshot / "actor" / "huggingface"
+    hf_model.mkdir(parents=True)
+    (hf_model / "config.json").write_text("{}\n", encoding="utf-8")
+    (hf_model / "model.safetensors").write_bytes(b"weights")
+    controller.store.snapshot_to(snapshot, state=root_state)
+    write_snapshot_manifest(snapshot)
+
+    with pytest.raises(RuntimeError, match="best-model snapshot is model-only"):
+        controller._recover_or_guard_state()

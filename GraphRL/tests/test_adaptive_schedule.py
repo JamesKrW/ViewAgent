@@ -493,3 +493,46 @@ def test_tracker_repairs_missing_checkpoint_state_from_atomic_root(tmp_path):
         (checkpoint / "adaptive_schedule_state.json").read_text(encoding="utf-8")
     )
     assert restored["rounds"]["0"]["last_observed_step"] == 20
+
+
+def test_tracker_rejects_unlatched_checkpoint_ahead_of_rollouts(tmp_path):
+    schedule = _schedule(tmp_path, 0, _config(sft_patience=5))
+    schedule.observe({METRIC: 0.0}, 0)
+    schedule.observe({METRIC: 0.0}, 20)
+    checkpoint = schedule.default_local_dir / "global_step_20"
+    (checkpoint / "actor").mkdir(parents=True)
+    (checkpoint / "data.pt").write_bytes(b"data")
+    schedule.store.snapshot_to(checkpoint)
+    tracker = schedule.default_local_dir / "latest_checkpointed_iteration.txt"
+    tracker.write_text("20", encoding="utf-8")
+
+    trainer = object.__new__(AdaptiveRayPPOTrainer)
+    trainer.config = SimpleNamespace(
+        trainer=SimpleNamespace(default_local_dir=str(schedule.default_local_dir))
+    )
+    trainer._run_schedule = schedule
+    trainer._repair_adaptive_checkpoint_tracker()
+
+    assert checkpoint.is_dir()
+    assert not tracker.exists()
+
+
+def test_tracker_accepts_latched_checkpoint_without_rollout_images(tmp_path):
+    schedule = _schedule(tmp_path, 0, _config(sft_patience=5))
+    schedule.observe({METRIC: 0.0}, 0)
+    schedule.observe({METRIC: 0.1}, 20)
+    checkpoint = schedule.default_local_dir / "global_step_20"
+    (checkpoint / "actor").mkdir(parents=True)
+    (checkpoint / "data.pt").write_bytes(b"data")
+    schedule.store.snapshot_to(checkpoint)
+    tracker = schedule.default_local_dir / "latest_checkpointed_iteration.txt"
+    tracker.write_text("1", encoding="utf-8")
+
+    trainer = object.__new__(AdaptiveRayPPOTrainer)
+    trainer.config = SimpleNamespace(
+        trainer=SimpleNamespace(default_local_dir=str(schedule.default_local_dir))
+    )
+    trainer._run_schedule = schedule
+    trainer._repair_adaptive_checkpoint_tracker()
+
+    assert tracker.read_text(encoding="utf-8") == "20"

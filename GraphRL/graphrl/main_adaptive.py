@@ -470,6 +470,7 @@ class AdaptiveGraphRLController(GraphRLController):
             )
         root_state = self.store.load() if self.store.path.exists() else None
         current_round = None if root_state is None else int(root_state["round"])
+        current_round_step = 0
         max_resume_step = None
         rollback_for_rollouts = False
         if root_state is not None and root_state.get("phase") in {
@@ -482,6 +483,7 @@ class AdaptiveGraphRLController(GraphRLController):
                     str(current_round), root_state.get("decision_step") or 0
                 )
             )
+            current_round_step = expected_step
             required_resume_step = required_rollout_prefix(
                 root_state, expected_step
             )
@@ -543,10 +545,21 @@ class AdaptiveGraphRLController(GraphRLController):
                     continue
                 if current_round is not None and int(state.get("round", -1)) != current_round:
                     continue
-                if "adaptive_best_snapshots" in path.parts and not is_complete_snapshot(
-                    path.parent
-                ):
-                    continue
+                if "adaptive_best_snapshots" in path.parts:
+                    candidate_round = int(state.get("round", 0))
+                    candidate_step = int(
+                        (state.get("steps_by_round") or {}).get(
+                            str(candidate_round), state.get("decision_step") or 0
+                        )
+                    )
+                    # A best snapshot intentionally contains only HF model weights
+                    # and controller metadata. Once RL has taken a train step it is
+                    # not an exact resume point: optimizer, scheduler, dataloader and
+                    # RNG state exist only in a regular verl checkpoint.
+                    if state.get("phase") == PHASE_RL and candidate_step > 0:
+                        continue
+                    if not is_complete_snapshot(path.parent):
+                        continue
                 if "verl_checkpoints" in path.parts:
                     checkpoint = path.parent
                     checkpoint_step = int(checkpoint.name.rsplit("_", 1)[-1])
@@ -614,6 +627,17 @@ class AdaptiveGraphRLController(GraphRLController):
             raise RuntimeError(
                 "adaptive state is ahead of every checkpoint with a complete "
                 "rollout prefix; no safe resume point exists"
+            )
+        if (
+            root_state is not None
+            and root_state.get("phase") == PHASE_RL
+            and current_round_step > 0
+        ):
+            raise RuntimeError(
+                "adaptive RL state is ahead of step 0, but no complete regular "
+                "checkpoint with model, optimizer, scheduler, RNG and controller "
+                "state exists; a best-model snapshot is model-only and cannot be "
+                "used for exact resume"
             )
 
     def _write_schedule_config(self) -> None:
