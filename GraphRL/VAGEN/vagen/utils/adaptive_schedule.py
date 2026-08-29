@@ -15,7 +15,10 @@ from graphrl.adaptive.model import (
     write_checkpoint_manifest,
     write_snapshot_manifest,
 )
-from graphrl.adaptive.rollouts import durable_rollout_prefix
+from graphrl.adaptive.rollouts import (
+    durable_rollout_prefix,
+    required_rollout_prefix,
+)
 from graphrl.adaptive.state import (
     CONFIG_FILENAME,
     DECISION_CONTINUE_RL,
@@ -101,6 +104,15 @@ class AdaptiveSchedule:
         is_scheduled = step % int(self.cfg["eval_every_steps"]) == 0
         exhausts_budget = prior_steps + step >= self.total_budget
         return is_scheduled or exhausts_budget
+
+    def should_capture_rollout_images(self) -> bool:
+        """Whether new rollout images can still be consumed by future SFT."""
+        state = self.store.load()
+        return (
+            int(state.get("round", -1)) == self.iteration
+            and state.get("phase") == PHASE_RL
+            and not bool(state.get("latched"))
+        )
 
     def observe(self, val_metrics: dict, global_steps: int) -> dict[str, Any]:
         """Record one validation and return the explicit controller decision."""
@@ -211,7 +223,10 @@ class AdaptiveSchedule:
 
         if self._threshold_reached(float(state["run_best"]["score"])):
             if not state.get("latched"):
-                print("[AdaptiveSchedule] threshold latched; SFT is disabled")
+                print(
+                    "[AdaptiveSchedule] threshold latched; SFT and rollout image "
+                    "capture are disabled"
+                )
             state["latched"] = True
 
         steps_by_round = dict(state.get("steps_by_round") or {})
@@ -342,15 +357,19 @@ class AdaptiveSchedule:
             raise RuntimeError(
                 f"regular checkpoint is incomplete for step {step}: {checkpoint_dir}"
             )
-        rollout_dir = self.default_local_dir.parent / "rollout_data"
-        rollout_step = durable_rollout_prefix(rollout_dir)
-        if rollout_step < step:
-            raise RuntimeError(
-                "regular checkpoint cannot commit before its rollout payload: "
-                f"checkpoint_step={step}, durable_rollout_step={rollout_step}"
-            )
-
         state = self.store.load()
+        required_rollout_step = required_rollout_prefix(state, step)
+        if required_rollout_step:
+            rollout_dir = self.default_local_dir.parent / "rollout_data"
+            rollout_step = durable_rollout_prefix(rollout_dir)
+            if rollout_step < required_rollout_step:
+                raise RuntimeError(
+                    "regular checkpoint cannot commit before its rollout payload: "
+                    f"checkpoint_step={step}, "
+                    f"required_rollout_step={required_rollout_step}, "
+                    f"durable_rollout_step={rollout_step}"
+                )
+
         terminal = (
             int(state.get("decision_round", -1)) == self.iteration
             and int(state.get("decision_step", -1)) == step

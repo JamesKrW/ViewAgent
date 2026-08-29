@@ -19,6 +19,7 @@ from graphrl.adaptive.state import (
 )
 from graphrl.vagen.adaptive_vagen_wrapper import AdaptiveVagenWrapper
 from vagen.adaptive_ray_trainer import AdaptiveRayPPOTrainer
+from vagen.ray_trainer import RayPPOTrainer
 from vagen.utils.adaptive_schedule import AdaptiveSchedule
 
 METRIC = "val-aux/ae/traj_success/mean@1"
@@ -151,6 +152,50 @@ def test_zero_anchor_accepts_any_strict_positive_gain(tmp_path):
     assert result["relative_gain"] == float("inf")
     assert result["patience_reset"] is True
     assert result["misses"] == 0
+
+
+def test_latch_disables_future_rollout_image_capture(tmp_path):
+    schedule = _schedule(tmp_path, 0, _config())
+    assert schedule.should_capture_rollout_images() is True
+
+    result = schedule.observe({METRIC: 0.1}, 0)
+
+    assert result["latched"] is True
+    assert schedule.should_capture_rollout_images() is False
+
+
+def test_adaptive_trainer_keeps_jsonl_but_disables_images_after_latch(
+    monkeypatch,
+):
+    parent_calls = []
+
+    def record_image_setting(self, *args, **kwargs):
+        parent_calls.append((self._log_image_enable, args, kwargs))
+
+    monkeypatch.setattr(
+        RayPPOTrainer,
+        "_log_rollout_data",
+        record_image_setting,
+    )
+    trainer = object.__new__(AdaptiveRayPPOTrainer)
+    trainer._adaptive_capture_disabled_logged = False
+    trainer._log_image_enable = True
+    trainer._run_schedule = SimpleNamespace(
+        should_capture_rollout_images=lambda: False
+    )
+
+    trainer._log_rollout_data("batch", {}, {}, "rollout_data")
+    assert parent_calls == [
+        (False, ("batch", {}, {}, "rollout_data"), {})
+    ]
+    assert trainer._log_image_enable is True
+    assert trainer._adaptive_capture_disabled_logged is True
+
+    trainer._run_schedule = SimpleNamespace(
+        should_capture_rollout_images=lambda: True
+    )
+    trainer._log_rollout_data("batch", {}, {}, "rollout_data")
+    assert parent_calls[-1][0] is True
 
 
 def test_resume_restores_state_snapshot_from_loaded_checkpoint(tmp_path):
@@ -293,6 +338,27 @@ def test_terminal_decision_becomes_ready_only_after_checkpoint(tmp_path):
 
     (checkpoint / "data.pt").write_bytes(b"truncated")
     assert not is_complete_checkpoint_manifest(checkpoint)
+
+
+def test_latched_checkpoint_does_not_require_rollout_payload(tmp_path):
+    schedule = _schedule(
+        tmp_path, 0, _config(eval_every_steps=1, sft_patience=5)
+    )
+    schedule.observe({METRIC: 0.0}, 0)
+    result = schedule.observe({METRIC: 0.1}, 1)
+    assert result["latched"] is True
+
+    checkpoint = schedule.default_local_dir / "global_step_1"
+    (checkpoint / "actor").mkdir(parents=True)
+    (checkpoint / "data.pt").write_bytes(b"data")
+    (schedule.default_local_dir / "latest_checkpointed_iteration.txt").write_text(
+        "1", encoding="utf-8"
+    )
+
+    schedule.commit_checkpoint_state(1)
+
+    assert (checkpoint / "adaptive_schedule_state.json").is_file()
+    assert is_complete_checkpoint_manifest(checkpoint)
 
 
 class _FakeActor:
