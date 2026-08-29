@@ -11,6 +11,10 @@ from graphrl.adaptive.model import (
     CHECKPOINT_MANIFEST,
     is_complete_checkpoint_manifest,
 )
+from graphrl.adaptive.rollouts import (
+    durable_rollout_prefix,
+    required_rollout_prefix,
+)
 from graphrl.adaptive.state import STATE_FILENAME
 
 from vagen.ray_trainer import RayPPOTrainer
@@ -75,6 +79,8 @@ class AdaptiveRayPPOTrainer(RayPPOTrainer):
                     )
 
         valid_steps = []
+        rollout_dir = checkpoint_root.parent / "rollout_data"
+        durable_prefix = None
         for checkpoint in checkpoint_root.glob("global_step_*"):
             try:
                 step = int(checkpoint.name.rsplit("_", 1)[-1])
@@ -83,7 +89,7 @@ class AdaptiveRayPPOTrainer(RayPPOTrainer):
                 )
             except (OSError, ValueError, json.JSONDecodeError):
                 continue
-            if (
+            checkpoint_is_complete = (
                 (checkpoint / "data.pt").is_file()
                 and (checkpoint / "actor").is_dir()
                 and state.get("config_fingerprint")
@@ -92,7 +98,13 @@ class AdaptiveRayPPOTrainer(RayPPOTrainer):
                     not (checkpoint / CHECKPOINT_MANIFEST).exists()
                     or is_complete_checkpoint_manifest(checkpoint)
                 )
-            ):
+            )
+            required_prefix = required_rollout_prefix(state, step)
+            if checkpoint_is_complete and required_prefix:
+                if durable_prefix is None:
+                    durable_prefix = durable_rollout_prefix(rollout_dir)
+                checkpoint_is_complete = durable_prefix >= required_prefix
+            if checkpoint_is_complete:
                 valid_steps.append(step)
 
         if valid_steps:
