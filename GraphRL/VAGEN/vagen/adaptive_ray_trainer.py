@@ -35,6 +35,7 @@ class AdaptiveRayPPOTrainer(RayPPOTrainer):
             self.config, experiment_root, int(round_index)
         )
         self._adaptive_first_validation = True
+        self._adaptive_capture_disabled_logged = False
 
     def _load_checkpoint(self):
         self._repair_adaptive_checkpoint_tracker()
@@ -149,11 +150,30 @@ class AdaptiveRayPPOTrainer(RayPPOTrainer):
                 self._schedule_stop = True
         return metrics
 
+    def _log_rollout_data(self, *args, **kwargs):
+        """Keep rollout JSONL, but stop materializing images after the latch."""
+        if self._run_schedule.should_capture_rollout_images():
+            return super()._log_rollout_data(*args, **kwargs)
+
+        if not self._adaptive_capture_disabled_logged:
+            print(
+                "[AdaptiveSchedule] rollout image capture disabled after "
+                "threshold latch; JSONL logging remains enabled"
+            )
+            self._adaptive_capture_disabled_logged = True
+
+        image_logging_was_enabled = self._log_image_enable
+        self._log_image_enable = False
+        try:
+            return super()._log_rollout_data(*args, **kwargs)
+        finally:
+            self._log_image_enable = image_logging_was_enabled
+
     def _save_checkpoint(self):
-        # The checkpoint's controller state promises that rollouts through this
-        # step are available for a later TrajToSFT phase.  VAGEN writes images
-        # asynchronously, so make that promise true before exposing the
-        # checkpoint/tracker to the persistence mirror.
+        # Drain payloads scheduled before the latest validation.  Pre-latch
+        # checkpoints require them for a possible TrajToSFT phase; a latch-step
+        # checkpoint may have one final in-flight dump because rollout logging
+        # happens immediately before validation.
         self._flush_image_dumps()
         super()._save_checkpoint()
         snapshot = self._run_schedule.commit_checkpoint_state(self.global_steps)

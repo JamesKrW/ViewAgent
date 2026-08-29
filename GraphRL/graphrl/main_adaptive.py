@@ -24,7 +24,10 @@ from graphrl.adaptive.model import (
     is_complete_hf_model,
     is_complete_snapshot,
 )
-from graphrl.adaptive.rollouts import durable_rollout_prefix
+from graphrl.adaptive.rollouts import (
+    durable_rollout_prefix,
+    required_rollout_prefix,
+)
 from graphrl.adaptive.state import (
     CONFIG_FILENAME,
     DECISION_STOP_RUN,
@@ -479,19 +482,25 @@ class AdaptiveGraphRLController(GraphRLController):
                     str(current_round), root_state.get("decision_step") or 0
                 )
             )
-            rollout_dir = (
-                self.experiment_dir
-                / f"iter_{current_round:03d}"
-                / "rl"
-                / "rollout_data"
+            required_resume_step = required_rollout_prefix(
+                root_state, expected_step
             )
-            max_resume_step = durable_rollout_prefix(rollout_dir)
-            rollback_for_rollouts = max_resume_step < expected_step
+            if required_resume_step:
+                rollout_dir = (
+                    self.experiment_dir
+                    / f"iter_{current_round:03d}"
+                    / "rl"
+                    / "rollout_data"
+                )
+                max_resume_step = durable_rollout_prefix(rollout_dir)
+            else:
+                max_resume_step = 0
+            rollback_for_rollouts = max_resume_step < required_resume_step
             if rollback_for_rollouts:
                 logger.warning(
                     "[adaptive] controller/checkpoint step %d exceeds durable "
                     "rollout prefix %d; rolling back to a consistent checkpoint",
-                    expected_step,
+                    required_resume_step,
                     max_resume_step,
                 )
 
@@ -548,11 +557,15 @@ class AdaptiveGraphRLController(GraphRLController):
                         / "rl"
                         / "rollout_data"
                     )
-                    checkpoint_rollout_prefix = durable_rollout_prefix(
-                        checkpoint_rollouts
+                    checkpoint_required_rollouts = required_rollout_prefix(
+                        state, checkpoint_step
                     )
-                    if checkpoint_step > checkpoint_rollout_prefix:
-                        continue
+                    if checkpoint_required_rollouts:
+                        checkpoint_rollout_prefix = durable_rollout_prefix(
+                            checkpoint_rollouts
+                        )
+                        if checkpoint_required_rollouts > checkpoint_rollout_prefix:
+                            continue
                     if not (checkpoint / "data.pt").is_file() or not (
                         checkpoint / "actor"
                     ).is_dir():

@@ -349,3 +349,38 @@ def test_recovery_rolls_back_checkpoint_ahead_of_rollout_prefix(tmp_path):
     assert not stale_model.exists()
     assert not (controller.experiment_dir / "iter_000" / "traj_to_sft").exists()
     assert not (controller.experiment_dir / "iter_000" / "sft").exists()
+
+
+def test_recovery_accepts_latched_checkpoint_without_rollouts(tmp_path):
+    controller = AdaptiveGraphRLController(_controller_config(tmp_path))
+    root_state = controller.store.initialize()
+    root_state.update(
+        {
+            "phase": "rl",
+            "decision": "continue_rl",
+            "decision_step": 60,
+            "latched": True,
+            "steps_by_round": {"0": 60},
+            "total_rl_steps": 60,
+            "rounds": {"0": {"last_observed_step": 60}},
+        }
+    )
+    controller.store.save(root_state)
+
+    checkpoint = (
+        controller.experiment_dir
+        / "iter_000"
+        / "rl"
+        / "verl_checkpoints"
+        / "global_step_60"
+    )
+    (checkpoint / "actor").mkdir(parents=True)
+    (checkpoint / "data.pt").write_bytes(b"data")
+    controller.store.snapshot_to(checkpoint, state=root_state)
+
+    controller._recover_or_guard_state()
+
+    restored = controller.store.load()
+    assert restored["latched"] is True
+    assert restored["total_rl_steps"] == 60
+    assert checkpoint.is_dir()
