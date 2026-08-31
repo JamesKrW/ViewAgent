@@ -1,36 +1,23 @@
-# Byte-compiled / optimized / DLL files
+# Generated artifacts live in the repository by default, but are never committed.
+/build/
+/data/
+/runs/
+/ckpt/
+/outputs/
+/transcripts/
+/logs/
+*.log
+*.log.gz
+
+# Vendored environment assets that are downloads, not source. spatial_gym/room_data is
+# ~1 GB; symlink it in rather than committing it.
+vagen/envs/spatial_gym/room_data/
+
 __pycache__/
 *.py[cod]
-*$py.class
-
-# C extensions
-*.so
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-*.log
+.pytest_cache/
+.ipynb_checkpoints/
 
-/data/
-/exps/
-/wandb/
-/outputs/
-/room_data/
-/rollouts/
+# wandb writes run directories into the cwd.
+wandb/

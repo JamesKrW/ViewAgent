@@ -1,5 +1,30 @@
 # GraphRL
 
+> **SLIME migration branch.** `GraphRL/VAGEN` is now a vendored snapshot of
+> VAGEN-SLIME. The validated Habitat-GS path is synchronous and starts through
+> `examples/viewsuite/habitat_gs_interactive_view_planning/run_slime.sh`.
+> Environment behavior remains under `view_suite`; the vendored backend contains
+> only generic build/runtime and Qwen2.5-VL checkpoint compatibility changes.
+
+Build the local backend environment with:
+
+```bash
+bash VAGEN/scripts/build_slime_env.sh
+```
+
+Run the two-episode integration check with:
+
+```bash
+WANDB_MODE=disabled \
+  bash examples/viewsuite/habitat_gs_interactive_view_planning/run_slime.sh \
+  --rollout-only \
+  --eval-yaml examples/viewsuite/habitat_gs_interactive_view_planning/slime/verify.yaml
+```
+
+The legacy `graphrl.main`/VAGEN-VERL instructions below describe the original
+backend and are retained as migration reference. They are not the entry point
+for the SLIME branch.
+
 Iterative `RL → TrajToSFT → SFT` pipeline for MLLM closed-loop optimisation.
 
 Mono-backend by design — RL is always **VAGEN/verl**, SFT is always

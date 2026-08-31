@@ -1,0 +1,38 @@
+# Held-out evaluation, in slime's own `--eval-config` shape (see examples/eval_multi_task).
+#
+# Richer than the `--eval-prompt-data <name> <path>` pair, and the difference is what a
+# multi-environment run needs: each entry carries its own sampling parameters, its own
+# metadata_key, optionally its own reward or generate path, over a shared `eval.defaults`.
+# A vision environment and a text one can then be evaluated in one run without either
+# borrowing the other's settings.
+#
+# Paths use OmegaConf's env interpolation because slime loads this with
+# `OmegaConf.to_container(cfg, resolve=True)`. The launcher exports VAGEN_DATA_DIR, so the
+# file needs no path fixing and stays working from any working directory.
+#
+# `metadata_key: metadata` is load-bearing: it is what carries the env spec (which
+# environment, which seed, how many turns) through to `vagen_agent.rollout.generate`.
+# Without it the eval set would load prompts and drop the environment they belong to, and
+# every episode would fail on a row with no `env_name`.
+
+eval:
+  defaults:
+    # slime falls back to `rollout_temperature` when this is unset, so a training-time
+    # temperature change would silently move the held-out numbers too.
+    temperature: 1.0
+    n_samples_per_eval_prompt: 1
+    metadata_key: metadata
+    input_key: prompt
+    label_key: label
+
+  datasets:
+    # The name is the wandb panel prefix (`eval/<name>-success`). Derived by the
+    # launcher from --eval-yaml rather than written here: a literal goes stale as soon as
+    # the eval set changes, and this one read `sokoban_text` against a vision dataset.
+    - name: ${oc.env:VAGEN_EVAL_NAME}
+      path: ${oc.env:VAGEN_EVAL_DATA}
+
+    # A second environment is added here, not in the launcher:
+    # - name: frozenlake_text
+    #   path: ${oc.env:VAGEN_DATA_DIR}/frozenlake_val.jsonl
+    #   n_samples_per_eval_prompt: 4
