@@ -175,7 +175,7 @@ CUDA_VISIBLE_DEVICES=0 CUDA_HOME=/usr/local/cuda-12.8 \
   python -m sglang.launch_server --model-path Qwen/Qwen2.5-VL-7B-Instruct \
   --port 30000 --mem-fraction-static 0.6 --chat-template qwen2-vl
 
-python -m vagen.evaluate.run_eval \
+python -m view_suite.evaluation.run_eval \
   --config examples/evaluation/eval_default_habitat_gs.yaml fileroot=$VIEWSUITE_ROOT
 ```
 
@@ -185,7 +185,7 @@ attached — a cheap check that the service and plumbing work before spending a 
 ### Training
 
 ```bash
-cd GraphRL                                  # the pipeline uses a relative vagen_dir
+cd /path/to/ViewAgent-slime/GraphRL
 export VIEWSUITE_ROOT=$(cd .. && pwd)
 CUDA_VISIBLE_DEVICES=0,2,3,4 \
   bash examples/viewsuite/habitat_gs_interactive_view_planning/run_smoke.sh   # RL only

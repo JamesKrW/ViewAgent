@@ -3,7 +3,7 @@ Random-action TrajToSFT phase.
 
 Differs from the standard active-explore pipeline in WHERE the rollouts come
 from: instead of consuming the just-finished RL rollouts, this phase invokes
-``vagen.evaluate.run_eval`` with the random-navigation backend on the training
+the VAGEN-SLIME evaluator with the random-navigation backend on the training
 split each iteration to collect *fresh* random-action trajectories. Once the
 graph is built from those, the dataset-generation logic is identical to
 ``InteractiveViewPlanningTrajToSFT`` (subclassed for that reason).
@@ -82,7 +82,7 @@ class RandomActionTrajToSFT(InteractiveViewPlanningTrajToSFT):
         if not eval_config_path:
             raise ValueError(
                 f"{self.__class__.__name__} requires 'eval_config' "
-                "(path to a vagen.evaluate.run_eval YAML for the training split)"
+                "(path to a ViewSuite/VAGEN-SLIME evaluation YAML for the training split)"
             )
         eval_config = Path(eval_config_path).expanduser().resolve()
         if not eval_config.is_file():
@@ -156,7 +156,7 @@ class RandomActionTrajToSFT(InteractiveViewPlanningTrajToSFT):
         base_seed: int,
         extra_overrides: List[str],
     ) -> None:
-        """Invoke vagen.evaluate.run_eval as a subprocess (own asyncio loop)."""
+        """Invoke the VAGEN-SLIME evaluator as a subprocess (own asyncio loop)."""
         cmd = [
             sys.executable, "-m",
             "graphrl.envs.viewsuite.viewsuite_random_sft_rl._run_eval_subprocess",

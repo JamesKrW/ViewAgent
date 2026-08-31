@@ -1,6 +1,6 @@
 """GraphRL: iterative RL → TrajToSFT → SFT pipeline.
 
-Mono-backend by design — RL is always VAGEN, SFT is always LLaMA-Factory.
+Mono-backend by design — RL is VAGEN-SLIME, SFT is LLaMA-Factory.
 The only user-extension point is TrajToSFT: subclass one of the four
 TrajToSFT base classes (always single inheritance, pick the most specific
 one that fits your use case) and point ``traj_to_sft.module`` in
@@ -13,6 +13,7 @@ pipeline.yaml at its dotted path::
 """
 
 from graphrl.state import ModuleOutput, ModuleState
+from graphrl.slime.wrapper import SlimeWrapper
 from graphrl.vagen.vagen_wrapper import VagenWrapper
 from graphrl.llama_factory.lf_wrapper import LFWrapper
 from graphrl.traj_to_sft.traj_to_sft_base import (
@@ -27,6 +28,7 @@ from graphrl.traj_to_sft.traj_to_sft_graph_reasoning_base import (
 )
 
 __all__ = [
+    "SlimeWrapper",
     "VagenWrapper",
     "LFWrapper",
     "TrajToSFTModule",

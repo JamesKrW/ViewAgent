@@ -1,6 +1,6 @@
 # ViewSuite Interactive View Planning Environment
 
-Multimodal active-exploration env for GraphRL. VAGEN agent navigates 3D
+Multimodal active-exploration env for GraphRL. The VAGEN-SLIME harness navigates 3D
 ScanNet scenes; the TrajToSFT phase converts those rollouts into a
 camera-pose graph and emits seven LLaMA-Factory datasets.
 
@@ -167,10 +167,11 @@ per record). Forward-dynamics negatives use
 general_overrides:
   rl:
     training_steps: 600
-    vagen_dir: VAGEN
-    hydra_overrides:
-      data: { train_files: ..., val_files: ... }
-      # …VAGEN/verl knobs…
+    slime:
+      train_envs: /absolute/path/to/train.yaml
+      eval_envs: /absolute/path/to/val.yaml
+      harness: concat
+      # …VAGEN-SLIME/SLIME knobs…
 
   traj_to_sft:
     module: graphrl.envs.viewsuite.viewsuite_interactive_view_planning.InteractiveViewPlanningTrajToSFT

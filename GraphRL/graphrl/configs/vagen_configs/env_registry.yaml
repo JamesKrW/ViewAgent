@@ -1,10 +1,9 @@
 # =============================================================================
-# Custom Environment Registry for GraphRL
+# Deprecated legacy environment registry (migration reference only)
 # =============================================================================
 #
-# This file overrides VAGEN's default env_registry.yaml via Hydra defaults.
-# Since this directory is the --config-path, Hydra finds this file before
-# searching the VAGEN searchpath.
+# Runtime registration now happens in ``view_suite.envs.slime_adapter`` using
+# VAGEN-SLIME's public ``register_env`` API.
 #
 # Add custom environments here. Existing VAGEN envs are listed as defaults.
 

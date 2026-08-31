@@ -7,15 +7,15 @@ This is the **only user-extension point** in the framework. Subclass
 I/O contract (both ends fixed by the mono-backend choice):
 
   Inputs (always present at ``self.paths.*``):
-      ``rollout_data``  -- VAGEN's ``rollout_data/`` directory
+      ``rollout_data``  -- VAGEN-SLIME's ``rollout_data/`` directory
                            (JSONL files + image subdirs, may be missing if RL
                            was skipped this iter — handle gracefully)
-      ``rl_model``      -- ``iter_XXX/rl_model/`` (HF model dir, may be missing
-                           if RL was skipped)
+      ``rl_model``      -- ``iter_XXX/rl/rl_model/`` (HF model dir, may be
+                           missing if RL was skipped)
       ``base_dir``      -- ``iter_XXX/`` (use for env-specific scratch dirs)
 
   Output (must be produced by ``run()``):
-      ``sft_data``      -- ``iter_XXX/sft_data/`` populated with
+      ``sft_data``      -- ``iter_XXX/traj_to_sft/sft_data/`` populated with
                            ``dataset_info.json`` + per-dataset .json files,
                            ready for LLaMA-Factory to consume.
 
@@ -54,8 +54,8 @@ class TrajToSFTPaths:
 
     base_dir: Path        # iter_XXX/
     rollout_data: Path    # iter_XXX/rl/rollout_data/
-    rl_model: Path        # iter_XXX/rl_model/
-    sft_data: Path        # iter_XXX/sft_data/   (output target)
+    rl_model: Path        # iter_XXX/rl/rl_model/
+    sft_data: Path        # iter_XXX/traj_to_sft/sft_data/   (output target)
 
 
 class TrajToSFTModule:
@@ -102,7 +102,10 @@ class TrajToSFTModule:
         self._log("Conversion complete")
 
     def is_done(self) -> bool:
-        return (self.paths.sft_data / "dataset_info.json").exists()
+        return (
+            (self.paths.sft_data / "dataset_info.json").is_file()
+            and (self.paths.sft_data / ".phase_done").is_file()
+        )
 
     def kill(self) -> None:
         self._state = ModuleState.TERMINATED

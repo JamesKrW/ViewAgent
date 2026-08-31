@@ -15,6 +15,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../../_slime_env.sh"
 EXPERIMENT_DIR="${PWD}/exps/sokoban/sokoban_text_pure_rl"
 
 mkdir -p "${EXPERIMENT_DIR}"
@@ -25,10 +26,9 @@ if [ -z "${WANDB_API_KEY:-}" ]; then
     export WANDB_MODE=offline
 fi
 
-python -m graphrl.main \
+"${SLIME_PYTHON}" -m graphrl.main \
     --config-path="${SCRIPT_DIR}" \
     --config-name=pipeline_pure_rl \
-    general_overrides.rl.hydra_overrides.data.train_files="${SCRIPT_DIR}/train.yaml" \
-    general_overrides.rl.hydra_overrides.data.val_files="${SCRIPT_DIR}/val.yaml" \
-    +iteration_overrides.iter0.rl.hydra_overrides.huggingface_hub.hf_save_freq=200 \
+    general_overrides.rl.slime.train_envs="${SCRIPT_DIR}/train.yaml" \
+    general_overrides.rl.slime.eval_envs="${SCRIPT_DIR}/val.yaml" \
     "$@" 2>&1 | tee "${LOG_FILE}"

@@ -1,13 +1,17 @@
 # =============================================================================
-# VAGEN RL Module Configuration (GraphRL-internal)
+# Deprecated pre-SLIME reference configuration
 # =============================================================================
 #
-# This config is loaded by GraphRL's config system (NOT by Hydra).
+# No shipped launcher loads this file. It remains only so downstream branches
+# can translate historical overrides to ``graphrl/configs/slime_configs``.
+# Current GraphRL code loads ``slime_configs/config.yaml`` instead.
+#
+# The historical format contained:
 # It contains:
 #   1. GraphRL-internal settings (timeout, poll_interval, etc.)
 #   2. hydra_overrides: dict of Hydra CLI args passed to VAGEN
 #
-# The Hydra config for VAGEN is in vagen_multiturn.yaml (same directory).
+# The old Hydra config is retained beside it as migration reference only.
 
 # --- GraphRL-internal settings ---
 

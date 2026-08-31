@@ -6,7 +6,6 @@ experiment_name: viewsuite_ivp_relative_earlystop
 
 iterations: null
 iteration_overrides: null
-rl_schedule: null
 
 general_overrides:
   rl:
