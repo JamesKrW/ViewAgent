@@ -1,5 +1,5 @@
 """
-Convert ``vagen.evaluate.run_eval`` dumps into the VAGEN rollout layout that
+Convert evaluator dumps into the GraphRL rollout layout that
 ``InteractiveViewPlanningGraphBuilder`` expects.
 
 Input (eval_random dumps)::

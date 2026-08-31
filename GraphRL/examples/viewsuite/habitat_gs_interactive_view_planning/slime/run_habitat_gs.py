@@ -95,6 +95,15 @@ def main(cfg: Config) -> None:
     os.environ["VIEWSUITE_ROOT"] = str(viewagent)
     if cfg.insecure_render_tls:
         os.environ["RENDER_TLS_NO_VERIFY"] = "1"
+    megatron_root = VAGEN_SLIME_ROOT / "build" / "Megatron-LM"
+    if not (megatron_root / "megatron" / "training").is_dir():
+        fallback = VIEWAGENT_ROOT.parent / "VAGEN-SLIME" / "build" / "Megatron-LM"
+        if (fallback / "megatron" / "training").is_dir():
+            megatron_root = fallback
+        else:
+            raise SystemExit(
+                "Megatron-LM is missing; run GraphRL/VAGEN/scripts/build_slime_env.sh"
+            )
     inherited = os.environ.get("PYTHONPATH", "")
     os.environ["PYTHONPATH"] = ":".join(
         part
@@ -103,6 +112,7 @@ def main(cfg: Config) -> None:
             str(GRAPHRL_ROOT),
             str(VAGEN_SLIME_ROOT),
             str(VAGEN_SLIME_ROOT / "slime"),
+            str(megatron_root),
             inherited,
         )
         if part

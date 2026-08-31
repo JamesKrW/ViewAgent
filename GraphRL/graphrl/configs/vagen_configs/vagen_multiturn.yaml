@@ -1,10 +1,9 @@
 # =============================================================================
-# VAGEN Hydra Config for GraphRL
+# Deprecated VAGEN/verl Hydra reference (not executable in this branch)
 # =============================================================================
 #
-# This is the Hydra entry config used by VAGEN PPO training when launched
-# from GraphRL. It inherits VAGEN's base configs via searchpath and allows
-# local overrides (e.g. env_registry.yaml in this directory).
+# Current entrypoints translate supported historical values into a native
+# ``SlimeLaunchSpec`` and never load this file.
 #
 # Searchpath uses relative paths from the GraphRL project root (CWD).
 

@@ -13,6 +13,7 @@ from vagen_agent.envs import BaseNoConcatEnv, build_env
 from vagen_agent.envs import get_env_cls
 from graphrl.slime import rollout as rollout_module
 from view_suite.envs.habitat_gs_proxy_task import slime_adapter as adapter_module
+from view_suite.envs.slime_adapter import resolve_legacy_data_paths
 
 
 class _FakeLegacyEnv:
@@ -53,8 +54,8 @@ def test_graphrl_rollout_registers_view_suite_environment() -> None:
 def test_adapter_preserves_limits_metrics_and_done_semantics(monkeypatch) -> None:
     async def scenario() -> None:
         monkeypatch.setattr(
-            adapter_module,
-            "_LegacyHabitatGSInteractiveViewPlanning",
+            adapter_module.HabitatGSInteractiveViewPlanning,
+            "delegate_class",
             _FakeLegacyEnv,
         )
         env = build_env(
@@ -91,3 +92,18 @@ def test_adapter_preserves_limits_metrics_and_done_semantics(monkeypatch) -> Non
         await timeout_env.close()
 
     asyncio.run(scenario())
+
+
+def test_adapter_resolves_historical_filtered_dataset_name(tmp_path) -> None:
+    canonical = tmp_path / "path_to_view_test.jsonl"
+    canonical.write_text("{}\n", encoding="utf-8")
+    resolved = resolve_legacy_data_paths(
+        {"jsonl_path": str(tmp_path / "path_to_view_test_filter.jsonl")}
+    )
+    assert resolved["jsonl_path"] == str(canonical)
+
+
+def test_adapter_does_not_hide_missing_dataset(tmp_path) -> None:
+    missing = tmp_path / "path_to_view_test_filter.jsonl"
+    resolved = resolve_legacy_data_paths({"jsonl_path": str(missing)})
+    assert resolved["jsonl_path"] == str(missing)

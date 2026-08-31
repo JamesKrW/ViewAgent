@@ -6,15 +6,13 @@ TrajToSFT phase to call directly.
 
 For each call we:
 
-  1. Build a vagen ``run_eval`` config in memory (one env entry, one episode
+  1. Build a VAGEN-SLIME evaluation config in memory (one env entry, one episode
      per record, seed = record index).
-  2. Register :class:`ReasoningEnv` with VAGEN's env registry under a
+  2. Register :class:`ReasoningEnv` through the ViewSuite-to-SLIME adapter under a
      unique name so vagen can instantiate it.
-  3. Patch ``run_eval.NORMAL_FINISH_REASONS`` so a ``max_turns`` exit no
-     longer counts as "completed" (we want to retry runs that hit the
-     refinement cap without validating).
-  4. Invoke ``run_eval.main()`` inline via a temporary ``sys.argv`` swap.
-  5. Walk ``dump_dir/tag_<tag_id>/`` and emit the augmented SFT JSON.
+  3. Retry unsuccessful prior results, then run the shared SLIME evaluator.
+  4. Export its records to the historical ``tag_<tag_id>`` view consumed by
+     the existing reasoning postprocessor.
 
 The sglang server is the caller's responsibility — passing ``base_url``
 to point at an already-running server. The :class:`SGLangServer` context
@@ -24,7 +22,8 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
+import asyncio
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -49,10 +48,11 @@ def _ensure_registered(env_name: str, env_cls: type = None) -> None:
     fine but the LAST class registered under a name wins.
     """
     global _REGISTERED
-    from vagen.envs.registry import register_env
+    from vagen_agent.envs import register_env
+    from view_suite.envs.slime_adapter import adapt_legacy_env
     if env_cls is None:
         env_cls = ReasoningEnv
-    register_env(env_name, env_cls)
+    register_env(env_name, adapt_legacy_env(env_name, env_cls))
     _REGISTERED = True
 
 
@@ -184,19 +184,22 @@ def run_vagen_eval_and_collect(
 
     _ensure_registered(env_name, env_cls=env_cls)
 
-    # vagen's resume treats {"done", "max_turns"} as "complete"; for reasoning
-    # augmentation we want to retry runs that hit max_turns without validating,
-    # so only "done" should mark a run as truly complete.
-    from vagen.evaluate import run_eval, runner as vagen_runner
-    run_eval.NORMAL_FINISH_REASONS = {"done"}
-    vagen_runner.NORMAL_FINISH_REASONS = {"done"}
+    from vagen_agent.evaluation.runner import run_evaluation
+    from view_suite.evaluation.config import load_legacy_config
+    from view_suite.evaluation.run_eval import _export_legacy_layout
 
-    argv_backup = sys.argv
-    sys.argv = ["run_eval", "--config", str(vagen_yaml)]
-    try:
-        run_eval.main()
-    finally:
-        sys.argv = argv_backup
+    config = load_legacy_config(vagen_yaml)
+    # Reasoning attempts that exhausted max_turns are intentionally retried.
+    model_root = config.output_dir / config.experiment_id / config.models[0].name
+    for result_path in model_root.glob("tag_*/seed_*/result.json"):
+        try:
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            result = {}
+        if not result.get("success"):
+            shutil.rmtree(result_path.parent, ignore_errors=True)
+    asyncio.run(run_evaluation(config))
+    _export_legacy_layout(config)
 
     return collect_augmented(
         dump_dir / f"tag_{tag_id}", salvage_partial=salvage_partial,

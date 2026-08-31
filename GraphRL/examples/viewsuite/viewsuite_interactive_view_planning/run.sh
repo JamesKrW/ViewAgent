@@ -15,9 +15,8 @@
 # =============================================================================
 
 set -euo pipefail
-: "${VIEWSUITE_ROOT:?VIEWSUITE_ROOT must be exported}"
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../../_slime_env.sh"
 EXPERIMENT_DIR="${PWD}/exps/viewsuite/viewsuite_interactive_view_planning"
 N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-8}"
 SFT_N_GPUS="${SFT_N_GPUS:-${N_GPUS_PER_NODE}}"
@@ -31,14 +30,13 @@ if [ -z "${WANDB_API_KEY:-}" ]; then
     export WANDB_MODE=offline
 fi
 
-python -m graphrl.main \
+"${SLIME_PYTHON}" -m graphrl.main \
     --config-path="${SCRIPT_DIR}" \
     --config-name=pipeline \
-    general_overrides.rl.hydra_overrides.data.train_files="${SCRIPT_DIR}/train_turn_format.yaml" \
-    general_overrides.rl.hydra_overrides.data.val_files="${SCRIPT_DIR}/val.yaml" \
+    general_overrides.rl.slime.train_envs="${SCRIPT_DIR}/train_turn_format.yaml" \
+    general_overrides.rl.slime.eval_envs="${SCRIPT_DIR}/val.yaml" \
     iterations=4 \
-    general_overrides.rl.hydra_overrides.trainer.n_gpus_per_node="${N_GPUS_PER_NODE}" \
-    general_overrides.rl.hydra_overrides.trainer.nnodes=1 \
+    general_overrides.rl.slime.num_gpus="${N_GPUS_PER_NODE}" \
     general_overrides.sft.n_gpus="${SFT_N_GPUS}" \
     'general_overrides.traj_to_sft.generators=[multi_turn_action_gen,view_difference,view_difference_mcq]' \
     iteration_overrides.iter0.rl.training_steps=65 \
@@ -48,7 +46,6 @@ python -m graphrl.main \
     general_overrides.traj_to_sft.graph_builder.atomize.enabled=true \
     general_overrides.traj_to_sft.graph_builder.merge_tol.position=0.2 \
     general_overrides.traj_to_sft.graph_builder.merge_tol.angle=10.0 \
-    +iteration_overrides.iter3.rl.hydra_overrides.data.train_files="${SCRIPT_DIR}/train.yaml" \
-    +iteration_overrides.iter3.rl.hydra_overrides.huggingface_hub.repo_id=viewsuite_interactive_view_planning \
-    +iteration_overrides.iter3.rl.hydra_overrides.trainer.log_image.enable=false \
+    +iteration_overrides.iter3.rl.slime.train_envs="${SCRIPT_DIR}/train.yaml" \
+    +iteration_overrides.iter3.rl.slime.record_rollout_images=false \
     "$@" 2>&1 | tee "${LOG_FILE}"

@@ -8,13 +8,13 @@ Two-phase behaviour for LoRA: (1) train adapter into ``_lora_adapter/``,
 (2) run ``llamafactory-cli export`` to merge the adapter into a full model.
 For full fine-tuning, only phase 1 runs.
 
-Cleanup of intermediate ``checkpoint-N/`` dirs is handled by the controller's
-iteration-level cleanup, NOT here. The minimal in-module cleanup just stops
-helper threads and subprocess on ``kill()``.
+Complete intermediate ``checkpoint-N/`` dirs are retained after interruption
+for exact resume and removed only after the SFT phase has completed.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -25,6 +25,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from graphrl.adaptive.model import is_complete_hf_model
 from graphrl.state import ModuleOutput, ModuleState
 from graphrl.llama_factory.utils.config_generator import (
     generate_sft_config,
@@ -45,7 +46,7 @@ class LFWrapper:
 
     Required ``output_paths``:
         ``base_dir``  -- ``iter_XXX/sft/``  (logs, generated config)
-        ``model``     -- ``iter_XXX/sft_model/`` (final HF model)
+        ``model``     -- ``iter_XXX/sft/sft_model/`` (final HF model)
 
     Notable config keys:
         ``llama_factory_dir``  -- LLaMA-Factory repo root (used as cwd)
@@ -94,6 +95,11 @@ class LFWrapper:
         model_dir = Path(self.output_paths["model"])
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        # LLaMA-Factory chooses the highest checkpoint directory by name.
+        # Remove only incomplete copies before config generation so a partial
+        # warm-storage sync cannot hide an older, valid resume point.
+        self._prune_incomplete_sft_checkpoints()
+
         sft_config_path = generate_sft_config(
             config=self.config,
             model_path=self.input_paths["model"],
@@ -105,7 +111,15 @@ class LFWrapper:
         cmd = ["llamafactory-cli", "train", str(sft_config_path)]
 
         project_name = self.config.get("_project_name", "graphrl")
+        experiment_name = self.config.get("_experiment_name", "graphrl_pipeline")
+        iteration = int(self.config.get("_iter_num", 0))
+        identity = "\0".join(
+            (project_name, experiment_name, str(iteration), "sft", str(model_dir.resolve()))
+        )
         env = {**os.environ, "PYTHONUNBUFFERED": "1", "WANDB_PROJECT": project_name}
+        if env.get("WANDB_MODE", "online") != "disabled":
+            env.setdefault("WANDB_RUN_ID", hashlib.sha256(identity.encode()).hexdigest()[:16])
+            env.setdefault("WANDB_RESUME", "allow")
         if self.config.get("force_torchrun", True):
             env["FORCE_TORCHRUN"] = "1"
         n_gpus = self.config.get("n_gpus")
@@ -154,11 +168,16 @@ class LFWrapper:
         if self._is_lora:
             return self._is_done_lora(model_dir)
 
-        if not (model_dir / "config.json").exists():
-            return False
-        safetensors = list(model_dir.glob("*.safetensors"))
-        bins = list(model_dir.glob("*.bin"))
-        if not safetensors and not bins:
+        if self._process is not None:
+            return_code = self._process.poll()
+            if return_code is not None and return_code != 0:
+                self._state = ModuleState.FAILED
+                self._log(f"SFT training failed (exit code {return_code})")
+                return False
+        if not is_complete_hf_model(model_dir):
+            if self._process is not None and self._process.poll() == 0:
+                self._state = ModuleState.FAILED
+                self._log("SFT process exited cleanly without a complete model")
             return False
         if self._process and self._process.poll() is None:
             return False
@@ -203,15 +222,11 @@ class LFWrapper:
         if self._merge_process.poll() is None:
             return False
 
-        if not (model_dir / "config.json").exists():
+        if not is_complete_hf_model(model_dir):
             if self._merge_process.returncode != 0:
                 self._log(
                     f"LoRA merge failed (exit code {self._merge_process.returncode})"
                 )
-            return False
-        safetensors = list(model_dir.glob("*.safetensors"))
-        bins = list(model_dir.glob("*.bin"))
-        if not safetensors and not bins:
             return False
 
         if self._state == ModuleState.LAUNCHED:
@@ -238,29 +253,30 @@ class LFWrapper:
         self._log_file_handle = None
         self._merge_log_handle = None
 
-        # Clean intermediate ``checkpoint-N/`` dirs (LF leftovers; not resume-relevant).
-        model_dir = Path(self.output_paths["model"])
-        if model_dir.exists():
-            for d in model_dir.iterdir():
-                if d.is_dir() and d.name.startswith("checkpoint-"):
-                    shutil.rmtree(d, ignore_errors=True)
-        if self._is_lora and self._lora_adapter_dir.exists():
-            for d in self._lora_adapter_dir.iterdir():
-                if d.is_dir() and d.name.startswith("checkpoint-"):
-                    shutil.rmtree(d, ignore_errors=True)
-
-        self._state = ModuleState.TERMINATED
-        self._log("Killed")
+        completed = self._state == ModuleState.DONE
+        if completed:
+            # Successful phases no longer need intermediate trainer shards.
+            model_dir = Path(self.output_paths["model"])
+            if model_dir.exists():
+                for directory in model_dir.iterdir():
+                    if directory.is_dir() and directory.name.startswith("checkpoint-"):
+                        shutil.rmtree(directory, ignore_errors=True)
+            if self._is_lora and self._lora_adapter_dir.exists():
+                for directory in self._lora_adapter_dir.iterdir():
+                    if directory.is_dir() and directory.name.startswith("checkpoint-"):
+                        shutil.rmtree(directory, ignore_errors=True)
+            self._log("Released resources; completed SFT checkpoints cleaned")
+        else:
+            self._state = ModuleState.TERMINATED
+            self._log("Killed; resumable SFT checkpoints retained")
 
     def is_already_complete(self) -> bool:
         model_dir = Path(self.output_paths.get("model", ""))
-        if (model_dir / "config.json").exists():
-            return True
-        return False
+        return is_complete_hf_model(model_dir)
 
     def get_output(self) -> ModuleOutput:
         model_path = self.output_paths.get("model")
-        if model_path and (Path(model_path) / "config.json").exists():
+        if model_path and is_complete_hf_model(model_path):
             _patch_text_model_type(Path(model_path) / "config.json")
             _drop_llamafactory_readme(Path(model_path))
             return ModuleOutput(model_path=model_path)
@@ -325,6 +341,84 @@ class LFWrapper:
 
     def _forward_output(self) -> None:
         self._forward_process_output(self._process, self._log_file_handle)
+
+    def _prune_incomplete_sft_checkpoints(self) -> None:
+        train_output_dir = self._lora_adapter_dir if self._is_lora else Path(
+            self.output_paths["model"]
+        )
+        if not train_output_dir.is_dir():
+            return
+
+        world_size = max(1, int(self.config.get("n_gpus", 1)))
+        uses_deepspeed = bool(
+            (self.config.get("hydra_overrides") or {}).get("deepspeed")
+        )
+        for checkpoint in train_output_dir.glob("checkpoint-*"):
+            if not checkpoint.is_dir():
+                continue
+            if self._is_resumable_sft_checkpoint(
+                checkpoint,
+                world_size=world_size,
+                uses_deepspeed=uses_deepspeed,
+                is_lora=self._is_lora,
+            ):
+                continue
+            shutil.rmtree(checkpoint, ignore_errors=True)
+            self._log(f"Removed incomplete SFT resume checkpoint: {checkpoint}")
+
+    @staticmethod
+    def _is_resumable_sft_checkpoint(
+        checkpoint: Path,
+        *,
+        world_size: int,
+        uses_deepspeed: bool,
+        is_lora: bool,
+    ) -> bool:
+        try:
+            checkpoint_step = int(checkpoint.name.rsplit("-", 1)[-1])
+            trainer_state = json.loads(
+                (checkpoint / "trainer_state.json").read_text(encoding="utf-8")
+            )
+            if int(trainer_state["global_step"]) != checkpoint_step:
+                return False
+        except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+            return False
+
+        if not (checkpoint / "config.json").is_file():
+            return False
+        weight_prefix = "adapter_model" if is_lora else "model"
+        weight_files = [
+            *checkpoint.glob(f"{weight_prefix}*.safetensors"),
+            *checkpoint.glob(f"{weight_prefix}*.bin"),
+        ]
+        if not weight_files or any(path.stat().st_size == 0 for path in weight_files):
+            return False
+
+        rng_files = list(checkpoint.glob("rng_state*.pth"))
+        if len(rng_files) < world_size or any(
+            path.stat().st_size == 0 for path in rng_files
+        ):
+            return False
+
+        if uses_deepspeed:
+            try:
+                tag = (checkpoint / "latest").read_text(encoding="utf-8").strip()
+            except OSError:
+                return False
+            state_dir = checkpoint / tag
+            model_states = list(state_dir.rglob("*model_states.pt"))
+            optim_states = list(state_dir.rglob("*optim_states.pt"))
+            return (
+                bool(tag)
+                and state_dir.is_dir()
+                and bool(model_states)
+                and all(path.stat().st_size > 0 for path in model_states)
+                and len(optim_states) >= world_size
+                and all(path.stat().st_size > 0 for path in optim_states)
+            )
+
+        required = [checkpoint / "optimizer.pt", checkpoint / "scheduler.pt"]
+        return all(path.is_file() and path.stat().st_size > 0 for path in required)
 
 
 def _patch_text_model_type(config_path: Path) -> None:

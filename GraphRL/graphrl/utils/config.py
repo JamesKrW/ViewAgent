@@ -17,7 +17,7 @@ from omegaconf import OmegaConf
 logger = logging.getLogger(__name__)
 
 # Paths (under ``graphrl/configs/``) of the two backend default config files.
-RL_DEFAULTS_PATH = "vagen_configs/config"
+RL_DEFAULTS_PATH = "slime_configs/config"
 SFT_DEFAULTS_PATH = "llamafactory_configs/config"
 
 # graphrl/configs/ — resolved once. This file lives at graphrl/utils/config.py,
@@ -28,7 +28,7 @@ _PACKAGE_CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 def load_pipeline_config(config_path: str) -> Dict[str, Any]:
     """Load the pipeline YAML and resolve OmegaConf interpolations.
 
-    The mono-backend controller auto-loads VAGEN/LlamaFactory module defaults
+    The mono-backend controller auto-loads SLIME/LlamaFactory module defaults
     itself; pipeline.yaml does not declare ``module_defaults``. This loader
     just resolves interpolations and returns a plain dict.
     """

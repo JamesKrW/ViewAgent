@@ -4,7 +4,7 @@ GraphRL pipeline entry point + center controller.
 Orchestrates the iterative pipeline ``RL → TrajToSFT → SFT`` per iteration.
 
 Mono-backend by design:
-  - RL  is always VAGEN  (graphrl.vagen.VagenWrapper)
+  - RL  is always VAGEN-SLIME  (graphrl.slime.SlimeWrapper)
   - SFT is always LLaMA-Factory (graphrl.llama_factory.LFWrapper)
   - TrajToSFT is the only user-extension point — pipeline.yaml supplies a
     dotted path to a ``TrajToSFTModule`` subclass via ``traj_to_sft.module``.
@@ -45,7 +45,7 @@ from graphrl import (
     ModuleState,
     TrajToSFTModule,
     TrajToSFTPaths,
-    VagenWrapper,
+    SlimeWrapper,
     load_traj_to_sft_class,
 )
 from graphrl.utils.config import (
@@ -69,21 +69,6 @@ logger = logging.getLogger(__name__)
 # is *skipped* (config null), the controller adds a ``MaterializePhase`` that
 # symlinks the upstream model into the missing slot — so resume detection,
 # downstream phases and end-of-iter cleanup all see a uniform layout.
-
-
-# The trainer writes rl_schedule_state.json; the controller reads it between
-# iterations. See vagen/utils/run_schedule.py.
-_SCHEDULE_STATE = "rl_schedule_state.json"
-
-
-def _read_schedule_state(experiment_dir) -> dict:
-    """Best-effort read; missing or malformed means "no opinion"."""
-    import json as _json
-    try:
-        with open(Path(experiment_dir) / _SCHEDULE_STATE) as f:
-            return _json.load(f)
-    except (OSError, ValueError):
-        return {}
 
 
 class MaterializePhase:
@@ -145,7 +130,7 @@ class MaterializePhase:
 
 # A "phase" is anything with launch / is_done / kill / get_output —
 # i.e. one of the three concrete module classes plus MaterializePhase.
-Phase = Union[VagenWrapper, TrajToSFTModule, LFWrapper, MaterializePhase]
+Phase = Union[SlimeWrapper, TrajToSFTModule, LFWrapper, MaterializePhase]
 
 
 # ── framework defaults (used when pipeline.yaml omits these keys) ─────────
@@ -217,22 +202,7 @@ class GraphRLController:
         current_model = last_output.model_path if last_output else self.initial_model
         current_data: Dict[str, str] = last_output.data_paths if last_output else {}
 
-        sched_cfg = (self.raw_config.get("rl_schedule") or {})
-        sched_on = bool(sched_cfg.get("enabled"))
-        budget = int(sched_cfg.get("total_accumulated_rl_step", 0) or 0)
-
         for iter_idx in range(start_iter, num_iterations):
-            st = _read_schedule_state(self.experiment_dir) if sched_on else {}
-
-            if st.get("stop_run"):
-                logger.info("[rl_schedule] trainer signalled stop_run -- pipeline ends "
-                            f"after {iter_idx} iteration(s)")
-                break
-            if budget and int(st.get("steps_spent", 0)) >= budget:
-                logger.info(f"[rl_schedule] RL budget spent "
-                            f"({st.get('steps_spent')}/{budget}) -- pipeline ends")
-                break
-
             logger.info("=" * 60)
             logger.info(f"ITERATION {iter_idx}/{num_iterations - 1}")
             logger.info("=" * 60)
@@ -240,25 +210,11 @@ class GraphRLController:
             iter_dir = self.experiment_dir / f"iter_{iter_idx:03d}"
             iter_config = self.iteration_overrides.get(iter_idx, {})
 
-            # The trainer is a separate process; it needs these to find the state.
+            # Retain the established fixed-flow environment variables for
+            # TrajToSFT extensions that use the round identity. Adaptive control
+            # has a separate namespace and entry point in ``main_adaptive``.
             os.environ["GRAPHRL_EXPERIMENT_DIR"] = str(self.experiment_dir)
             os.environ["GRAPHRL_ITERATION"] = str(iter_idx)
-            # Hand the schedule to the trainer through a file. verl's trainer config
-            # is a struct, so a new key cannot be injected via hydra overrides.
-            if sched_on:
-                import json as _json
-                with open(Path(self.experiment_dir) / "rl_schedule_config.json", "w") as f:
-                    _json.dump(dict(sched_cfg), f, indent=2, sort_keys=True)
-
-            # Latched: drop traj_to_sft and SFT. _build_phases symlinks
-            # rl_model -> sft_model when the SFT config is empty.
-            if sched_on and st.get("latched"):
-                logger.info("[rl_schedule] latched (best %.4f) -- skipping traj_to_sft "
-                            "and SFT for iteration %d; the view graph is not needed",
-                            float(st.get("best_score") or 0.0), iter_idx)
-                iter_config = dict(iter_config)
-                iter_config["traj_to_sft"] = None
-                iter_config["sft"] = None
 
             phases = self._build_phases(iter_idx, iter_dir, iter_config, current_model)
             phase_start = start_phase if iter_idx == start_iter else 0
@@ -335,7 +291,7 @@ class GraphRLController:
     # ── phase execution ──────────────────────────────────────────────────
 
     def _run_module(self, module: Phase) -> ModuleOutput:
-        needs_gpu = isinstance(module, (VagenWrapper, LFWrapper))
+        needs_gpu = isinstance(module, (SlimeWrapper, LFWrapper))
 
         if needs_gpu and self._active_module:
             logger.info(
@@ -377,8 +333,9 @@ class GraphRLController:
                 raise RuntimeError(f"Module [{module.name}] failed")
             elapsed = time.monotonic() - start
             if elapsed > timeout:
-                logger.warning(f"[{module.name}] Timeout after {elapsed:.0f}s")
-                return
+                raise TimeoutError(
+                    f"Module [{module.name}] timed out after {elapsed:.0f}s"
+                )
             time.sleep(poll_interval)
 
     # ── phase construction ────────────────────────────────────────────────
@@ -397,21 +354,22 @@ class GraphRLController:
 
             iter_XXX/
                 rl/                  # RL working directory
-                    rollout_data/    # VAGEN rollout JSONLs (TrajToSFT input)
-                    verl_checkpoints/
-                rl_model/            # RL output, OR symlink → upstream model
-                sft_data/            # LLaMA-Factory dataset (TrajToSFT output)
+                    rollout_data/    # compatibility JSONLs (TrajToSFT input)
+                    slime_checkpoints/
+                    rl_model/        # RL output, OR symlink → upstream model
+                traj_to_sft/
+                    sft_data/        # LLaMA-Factory dataset
                 sft/                 # SFT working directory (logs, config)
-                sft_model/           # SFT output, OR symlink → rl_model
+                    sft_model/       # SFT output, OR symlink → rl_model
 
         When RL is skipped (``rl: null`` for this iter), the controller adds
         a ``MaterializePhase`` that symlinks the upstream model into
-        ``iter_N/rl_model``. iter_0 with RL skipped requires a local
-        ``initial_model_path`` (or a pre-placed ``iter_0/rl_model/``).
+        ``iter_N/rl/rl_model``. iter_0 with RL skipped requires a local
+        ``initial_model_path`` (or a pre-placed ``iter_0/rl/rl_model/``).
 
         When SFT is skipped, a ``MaterializePhase`` symlinks
-        ``iter_N/rl_model`` → ``iter_N/sft_model`` so downstream iters can
-        always start from ``iter_N/sft_model``.
+        ``iter_N/rl/rl_model`` → ``iter_N/sft/sft_model`` so downstream iters
+        can always start from ``iter_N/sft/sft_model``.
         """
         phases: List[Phase] = []
 
@@ -435,7 +393,7 @@ class GraphRLController:
             rl_cfg["_iter_num"] = iter_num
             rl_cfg["_project_name"] = project_name
             rl_cfg["_experiment_name"] = experiment_name
-            phases.append(VagenWrapper(
+            phases.append(SlimeWrapper(
                 config=rl_cfg,
                 input_paths={"model": current_model},
                 output_paths={

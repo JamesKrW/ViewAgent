@@ -6,7 +6,7 @@
 # Requires the AI2-THOR HTTP render service running and its URL in
 # client_url_ai2thor.txt (see scripts/ai2thor_http_service.sh).
 #
-#   VIEWSUITE_ROOT=$(pwd) python -m vagen.evaluate.run_eval \
+#   VIEWSUITE_ROOT=$(pwd) python -m view_suite.evaluation.run_eval \
 #     --config examples/evaluation/eval_random_ai2thor.yaml fileroot=$(pwd)
 # ─────────────────────────────────────────────────────────────────────
 

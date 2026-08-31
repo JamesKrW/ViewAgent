@@ -229,7 +229,7 @@ class AdaptiveStateStore:
     def snapshot_to(
         self, checkpoint_dir: str | Path, state: dict[str, Any] | None = None
     ) -> Path:
-        """Copy the current atomic state beside a resumable verl checkpoint."""
+        """Copy the current atomic state beside a resumable SLIME checkpoint."""
         state = self.load() if state is None else state
         target = Path(checkpoint_dir) / STATE_FILENAME
         self._write_atomic(target, state)

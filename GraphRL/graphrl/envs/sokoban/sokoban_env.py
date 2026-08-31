@@ -12,7 +12,7 @@ from .utils.prompt import (
 from .utils.utils import parse_response, numpy_to_pil
 
 
-from vagen.envs.gym_image_env import GymImageEnv
+from view_suite.gym.gym_image_env import GymImageEnv
 
 import asyncio
 from dataclasses import dataclass

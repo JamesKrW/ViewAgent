@@ -30,3 +30,10 @@ backends:
     max_retries: 6
     min_backoff: 0.5
     max_backoff: 8.0
+  openai:
+    model: "gpt-5"
+    api_key: ""             # or export OPENAI_API_KEY
+    max_concurrency: 4
+    max_retries: 6
+    min_backoff: 0.5
+    max_backoff: 8.0

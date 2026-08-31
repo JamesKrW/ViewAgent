@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from graphrl.adaptive.model import write_snapshot_manifest
+from graphrl.adaptive.model import write_checkpoint_manifest, write_snapshot_manifest
 from graphrl.adaptive.rollouts import durable_rollout_prefix
 from graphrl.adaptive.state import AdaptiveStateStore
 from graphrl.adaptive.viewsuite_traj_to_sft import (
@@ -14,7 +14,7 @@ from graphrl.adaptive.viewsuite_traj_to_sft import (
 )
 from graphrl.llama_factory.adaptive_lf_wrapper import AdaptiveLFWrapper
 from graphrl.main_adaptive import AdaptiveGraphRLController
-from graphrl.vagen.adaptive_vagen_wrapper import AdaptiveVagenWrapper
+from graphrl.slime.adaptive_wrapper import AdaptiveSlimeWrapper
 
 
 def _controller_config(tmp_path: Path) -> dict:
@@ -23,7 +23,7 @@ def _controller_config(tmp_path: Path) -> dict:
         "initial_model_path": str(tmp_path / "base_model"),
         "iterations": 4,
         "general_overrides": {
-            "rl": {"training_steps": 65, "hydra_overrides": {"trainer": {}}},
+            "rl": {"training_steps": 65, "slime": {}},
             "traj_to_sft": {"module": "unused.module"},
             "sft": {},
         },
@@ -65,26 +65,32 @@ def test_backend_horizon_is_remaining_global_budget_not_per_round_limit(tmp_path
     # The trainer resumes at local step 40 and is allowed 701 new steps:
     # 40 + (801 global budget - 100 already consumed) == 741.
     assert result["rl"]["training_steps"] - state["steps_by_round"]["1"] == 701
-    trainer = result["rl"]["hydra_overrides"]["trainer"]
-    assert trainer["test_freq"] == 20
-    assert trainer["save_freq"] == 20
-    assert trainer["val_before_train"] is True
-    assert trainer["save_best_val"] is False
+    slime = result["rl"]["slime"]
+    assert slime["eval_interval"] == 20
+    assert slime["save_interval"] == 20
+    assert slime["train_script"] == "graphrl/slime/train_adaptive.py"
 
 
-def test_adaptive_command_uses_separate_trainer_entrypoint(tmp_path):
-    wrapper = AdaptiveVagenWrapper(
-        config={"training_steps": 741, "vagen_dir": "."},
+def test_adaptive_launch_spec_uses_separate_trainer_entrypoint(tmp_path):
+    train = tmp_path / "train.yaml"
+    val = tmp_path / "val.yaml"
+    train.write_text("envs: []\n", encoding="utf-8")
+    val.write_text("envs: []\n", encoding="utf-8")
+    wrapper = AdaptiveSlimeWrapper(
+        config={
+            "training_steps": 741,
+            "_iter_num": 1,
+            "slime": {"train_envs": str(train), "eval_envs": str(val)},
+        },
         input_paths={"model": "/model"},
         output_paths={
             "base_dir": str(tmp_path / "iter_001" / "rl"),
             "model": str(tmp_path / "iter_001" / "rl" / "rl_model"),
         },
     )
-    command = wrapper._build_command(Path(wrapper.output_paths["base_dir"]))
-    assert command[2] == "vagen.main_ppo_adaptive"
-    assert "trainer.total_training_steps=741" in command
-    assert "trainer.total_epochs=741" in command
+    spec = wrapper.launch_spec()
+    assert spec.train_script == "graphrl/slime/train_adaptive.py"
+    assert spec.num_rollout == 741
 
 
 def test_missing_root_state_recovers_from_regular_checkpoint(tmp_path):
@@ -99,13 +105,14 @@ def test_missing_root_state_recovers_from_regular_checkpoint(tmp_path):
         controller.experiment_dir
         / "iter_000"
         / "rl"
-        / "verl_checkpoints"
-        / "global_step_20"
+        / "slime_checkpoints"
+        / "iter_0000019"
     )
     (checkpoint / "actor").mkdir(parents=True)
     (checkpoint / "data.pt").write_bytes(b"data")
     _write_complete_rollouts(checkpoint.parent.parent / "rollout_data", 20)
     controller.store.snapshot_to(checkpoint)
+    write_checkpoint_manifest(checkpoint)
     controller.store.path.unlink()
 
     controller._recover_or_guard_state()
@@ -152,13 +159,14 @@ def test_existing_root_reconciles_terminal_commit_from_checkpoint(tmp_path):
         controller.experiment_dir
         / "iter_000"
         / "rl"
-        / "verl_checkpoints"
-        / "global_step_20"
+        / "slime_checkpoints"
+        / "iter_0000019"
     )
     (checkpoint / "actor").mkdir(parents=True)
     (checkpoint / "data.pt").write_bytes(b"data")
     _write_complete_rollouts(checkpoint.parent.parent / "rollout_data", 20)
     controller.store.snapshot_to(checkpoint, state=committed)
+    write_checkpoint_manifest(checkpoint)
 
     controller._recover_or_guard_state()
     assert controller.store.load()["decision_ready"] is True
@@ -295,8 +303,8 @@ def test_stale_rl_marker_is_not_authoritative_after_state_rollback(tmp_path):
         encoding="utf-8",
     )
 
-    wrapper = AdaptiveVagenWrapper(
-        config={"_iter_num": 0, "training_steps": 801, "vagen_dir": "."},
+    wrapper = AdaptiveSlimeWrapper(
+        config={"_iter_num": 0, "training_steps": 801},
         input_paths={"model": "unused"},
         output_paths={"base_dir": str(model.parent), "model": str(model)},
     )
@@ -321,7 +329,7 @@ def test_recovery_rolls_back_checkpoint_ahead_of_rollout_prefix(tmp_path):
         (rollout_dir / f"{step}.jsonl").write_text("{}\n", encoding="utf-8")
         (rollout_dir / f"image_{step}" / "0.png").write_bytes(b"png")
 
-    checkpoint_root = rollout_dir.parent / "verl_checkpoints"
+    checkpoint_root = rollout_dir.parent / "slime_checkpoints"
     state20 = copy.deepcopy(root_state)
     state20["phase"] = "rl"
     state20["decision"] = "continue_rl"
@@ -330,11 +338,24 @@ def test_recovery_rolls_back_checkpoint_ahead_of_rollout_prefix(tmp_path):
     state20["steps_by_round"] = {"0": 20}
     state20["total_rl_steps"] = 20
     state20["rounds"] = {"0": {"last_observed_step": 20}}
+    checkpoints = {}
     for step, state in ((20, state20), (60, root_state)):
-        checkpoint = checkpoint_root / f"global_step_{step}"
+        checkpoint = checkpoint_root / f"iter_{step - 1:07d}"
         (checkpoint / "actor").mkdir(parents=True)
         (checkpoint / "data.pt").write_bytes(b"data")
         controller.store.snapshot_to(checkpoint, state=state)
+        write_checkpoint_manifest(checkpoint)
+        checkpoints[step] = checkpoint
+
+    stale_critic = checkpoint_root / "critic" / "iter_0000059"
+    stale_critic.mkdir(parents=True)
+    stale_dataset = (
+        checkpoint_root / "rollout" / "global_dataset_state_dict_59.pt"
+    )
+    stale_dataset.parent.mkdir(parents=True)
+    stale_dataset.write_bytes(b"dataset")
+    stale_hf = rollout_dir.parent / "hf_checkpoints" / "rollout_59"
+    stale_hf.mkdir(parents=True)
 
     stale_model = rollout_dir.parent / "rl_model"
     stale_model.mkdir()
@@ -347,12 +368,19 @@ def test_recovery_rolls_back_checkpoint_ahead_of_rollout_prefix(tmp_path):
     assert restored["phase"] == "rl"
     assert restored["total_rl_steps"] == 20
     assert durable_rollout_prefix(rollout_dir) == 20
+    assert not (rollout_dir / "21.jsonl").exists()
+    assert not (rollout_dir / "image_21").exists()
+    assert checkpoints[20].is_dir()
+    assert not checkpoints[60].exists()
+    assert not stale_critic.exists()
+    assert not stale_dataset.exists()
+    assert not stale_hf.exists()
     assert not stale_model.exists()
     assert not (controller.experiment_dir / "iter_000" / "traj_to_sft").exists()
     assert not (controller.experiment_dir / "iter_000" / "sft").exists()
 
 
-def test_recovery_accepts_latched_checkpoint_without_rollouts(tmp_path):
+def test_recovery_accepts_latched_checkpoint_with_jsonl_but_without_images(tmp_path):
     controller = AdaptiveGraphRLController(_controller_config(tmp_path))
     root_state = controller.store.initialize()
     root_state.update(
@@ -372,12 +400,18 @@ def test_recovery_accepts_latched_checkpoint_without_rollouts(tmp_path):
         controller.experiment_dir
         / "iter_000"
         / "rl"
-        / "verl_checkpoints"
-        / "global_step_60"
+        / "slime_checkpoints"
+        / "iter_0000059"
     )
     (checkpoint / "actor").mkdir(parents=True)
     (checkpoint / "data.pt").write_bytes(b"data")
     controller.store.snapshot_to(checkpoint, state=root_state)
+    write_checkpoint_manifest(checkpoint)
+    rollout_dir = checkpoint.parent.parent / "rollout_data"
+    for step in range(1, 61):
+        rollout_dir.mkdir(parents=True, exist_ok=True)
+        (rollout_dir / f"{step}.jsonl").write_text("{}\n", encoding="utf-8")
+        (rollout_dir / f"{step}.complete").write_text("complete\n", encoding="utf-8")
 
     controller._recover_or_guard_state()
 
@@ -423,6 +457,47 @@ def test_rl_state_ahead_rejects_model_only_best_snapshot(tmp_path):
     (hf_model / "model.safetensors").write_bytes(b"weights")
     controller.store.snapshot_to(snapshot, state=root_state)
     write_snapshot_manifest(snapshot)
+    _write_complete_rollouts(
+        controller.experiment_dir / "iter_000" / "rl" / "rollout_data", 20
+    )
 
     with pytest.raises(RuntimeError, match="best-model snapshot is model-only"):
         controller._recover_or_guard_state()
+
+
+def test_missing_root_state_can_recover_from_step_zero_snapshot(tmp_path):
+    controller = AdaptiveGraphRLController(_controller_config(tmp_path))
+    state = controller.store.initialize()
+    snapshot = (
+        controller.experiment_dir
+        / "adaptive_best_snapshots"
+        / "round_000_step_000000"
+    )
+    hf_model = snapshot / "actor" / "huggingface"
+    hf_model.mkdir(parents=True)
+    (hf_model / "config.json").write_text("{}\n", encoding="utf-8")
+    (hf_model / "model.safetensors").write_bytes(b"weights")
+    controller.store.snapshot_to(snapshot, state=state)
+    write_snapshot_manifest(snapshot)
+    controller.store.path.unlink()
+
+    checkpoint_root = (
+        controller.experiment_dir / "iter_000" / "rl" / "slime_checkpoints"
+    )
+    stale_checkpoint = checkpoint_root / "iter_0000000"
+    stale_checkpoint.mkdir(parents=True)
+    tracker = checkpoint_root / "latest_checkpointed_iteration.txt"
+    tracker.write_text("0", encoding="utf-8")
+    stale_rollout = (
+        controller.experiment_dir / "iter_000" / "rl" / "rollout_data" / "1.jsonl"
+    )
+    stale_rollout.parent.mkdir(parents=True)
+    stale_rollout.write_text("{}\n", encoding="utf-8")
+
+    controller._recover_or_guard_state()
+
+    restored = controller.store.load()
+    assert restored["total_rl_steps"] == 0
+    assert not tracker.exists()
+    assert not stale_checkpoint.exists()
+    assert not stale_rollout.exists()

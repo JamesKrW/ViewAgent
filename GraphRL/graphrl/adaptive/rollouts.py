@@ -7,12 +7,23 @@ from typing import Any
 
 
 def rollout_step_is_complete(rollout_dir: str | Path, step: int) -> bool:
-    """Return whether one step has both non-empty JSONL and image payloads."""
+    """Return whether one rollout step was atomically published.
+
+    New SLIME runs publish ``<step>.complete`` only after their JSONL and any
+    enabled images are durable.  Images are intentionally optional after the
+    adaptive latch, while JSONL remains available for diagnostics.  The image
+    check is retained as a fallback for older VAGEN experiment directories.
+    """
     root = Path(rollout_dir)
     jsonl = root / f"{int(step)}.jsonl"
     images = root / f"image_{int(step)}"
+    marker = root / f"{int(step)}.complete"
     try:
-        if not jsonl.is_file() or jsonl.stat().st_size <= 0 or not images.is_dir():
+        if not jsonl.is_file() or jsonl.stat().st_size <= 0:
+            return False
+        if marker.is_file():
+            return marker.read_text(encoding="utf-8").strip() == "complete"
+        if not images.is_dir():
             return False
         return any(path.is_file() and path.stat().st_size > 0 for path in images.rglob("*"))
     except OSError:
@@ -32,12 +43,8 @@ def required_rollout_prefix(
 ) -> int:
     """Return the rollout prefix needed to resume one adaptive checkpoint.
 
-    Before the success threshold is latched, every trajectory may feed a later
-    TrajToSFT phase, so the checkpoint is only self-consistent when rollout data
-    is durable through the same step.  Once latched, SFT is permanently disabled
-    for the run. JSONL may still be kept for diagnostics, but image payloads and
-    a complete rollout prefix are no longer part of resumability.
+    Every checkpoint must have the matching JSONL/commit marker even after the
+    success latch.  The latch disables image capture only; it does not disable
+    rollout accounting, W&B validation, or the durable JSONL audit trail.
     """
-    if bool(state.get("latched")):
-        return 0
     return max(0, int(checkpoint_step))

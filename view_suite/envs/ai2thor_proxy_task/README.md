@@ -79,7 +79,7 @@ a quick check that the service and plumbing work before spending a real eval on 
 ## Training
 
 ```bash
-cd GraphRL                              # the pipeline uses a relative vagen_dir
+cd /path/to/ViewAgent-slime/GraphRL
 export VIEWSUITE_ROOT=$(cd .. && pwd)
 bash examples/viewsuite/ai2thor_interactive_view_planning/run_smoke.sh   # RL-only smoke
 bash examples/viewsuite/ai2thor_interactive_view_planning/run.sh         # 4 iterations

@@ -12,7 +12,7 @@ re-checked at every subsequent iter end via :func:`process_pending_deletes`):
   * **on_sft_model** — fires once *this* iter has a *real* ``sft_model/``
     (a complete HF dir that is NOT just a symlink to this iter's
     ``rl_model/``). Used to drop SFT inputs (``rl_model``, ``rollout_data``,
-    ``sft_data``, ``random_sft_stage``, ``verl_checkpoints``) once SFT has
+    ``sft_data``, ``random_sft_stage``, ``slime_checkpoints``) once SFT has
     consumed them.
 
   * **on_next_rl_model** — fires once *the next* iter has a *real*
@@ -55,7 +55,8 @@ RESOURCE_PATHS = {
     "sft":              "sft",                   # whole SFT working dir
     "traj_to_sft":      "traj_to_sft",           # whole TrajToSFT scratch
     "rollout_data":     "rl/rollout_data",
-    "verl_checkpoints": "rl/verl_checkpoints",
+    "slime_checkpoints": "rl/slime_checkpoints",
+    "verl_checkpoints": "rl/slime_checkpoints",  # deprecated config alias
     "graph":            "traj_to_sft/graph",
     "random_sft_stage": "traj_to_sft/random_sft_stage",
 }
@@ -69,6 +70,7 @@ _TRIGGERED_ON_SFT_MODEL = {
     "sft_data",
     "traj_to_sft",         # graph + sft_data_old + reasoning_dump
     "random_sft_stage",
+    "slime_checkpoints",
     "verl_checkpoints",
 }
 

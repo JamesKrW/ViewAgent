@@ -51,14 +51,29 @@ def write_snapshot_manifest(snapshot: str | Path) -> Path:
     return manifest_path
 
 
-def write_checkpoint_manifest(checkpoint: str | Path) -> Path:
-    """Atomically record file sizes after a regular RL checkpoint is complete."""
+def write_checkpoint_manifest(
+    checkpoint: str | Path,
+    related_paths: tuple[str | Path, ...] = (),
+) -> Path:
+    """Atomically record every file required to resume an RL checkpoint.
+
+    SLIME stores the actor, critic and global rollout-dataset cursor in sibling
+    locations.  ``related_paths`` lets one commit manifest cover that complete
+    resume bundle instead of declaring the actor directory complete by itself.
+    """
     root = Path(checkpoint)
     manifest_path = root / CHECKPOINT_MANIFEST
+    candidates = [path for path in sorted(root.rglob("*")) if path.is_file()]
+    for related in related_paths:
+        path = Path(related)
+        if path.is_file():
+            candidates.append(path)
+        elif path.is_dir():
+            candidates.extend(item for item in sorted(path.rglob("*")) if item.is_file())
     files = {
-        str(path.relative_to(root)): path.stat().st_size
-        for path in sorted(root.rglob("*"))
-        if path.is_file() and path != manifest_path
+        os.path.relpath(path, root): path.stat().st_size
+        for path in candidates
+        if path != manifest_path
     }
     fd, temporary_name = tempfile.mkstemp(
         prefix=f".{manifest_path.name}.", dir=str(root)

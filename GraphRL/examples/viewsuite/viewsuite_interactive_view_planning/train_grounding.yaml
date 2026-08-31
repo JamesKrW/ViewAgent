@@ -7,8 +7,8 @@
 envs:
   - name: InteractiveViewPlanning
     data_source: ae
-    seed: [0, 3419, 1]
-    n_envs: 3419
+    seed: [0, 3389, 1]
+    n_envs: 3389
     max_turns: 10
     response_length_per_turn: 1024
     config:

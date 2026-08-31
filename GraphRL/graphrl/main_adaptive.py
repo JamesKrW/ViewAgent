@@ -1,6 +1,6 @@
 """Adaptive, metric-driven GraphRL controller.
 
-This is a separate entry point from :mod:`graphrl.main`.  Legacy scripts keep
+This is a separate entry point from :mod:`graphrl.main`. Fixed-schedule scripts keep
 their fixed iteration/step control flow; adaptive scripts opt into this state
 machine by invoking ``python -m graphrl.main_adaptive``.
 """
@@ -17,7 +17,7 @@ from pathlib import Path
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from graphrl import LFWrapper, TrajToSFTModule, VagenWrapper
+from graphrl import LFWrapper, SlimeWrapper, TrajToSFTModule
 from graphrl.adaptive.model import (
     CHECKPOINT_MANIFEST,
     is_complete_checkpoint_manifest,
@@ -51,7 +51,7 @@ from graphrl.main import (
 )
 from graphrl.utils.iter_cleanup import cleanup_iter, process_pending_deletes
 from graphrl.utils.logging import setup_logging
-from graphrl.vagen.adaptive_vagen_wrapper import AdaptiveVagenWrapper
+from graphrl.slime.adaptive_wrapper import AdaptiveSlimeWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +149,7 @@ class AdaptiveGraphRLController(GraphRLController):
                 os.environ["GRAPHRL_ADAPTIVE_ROUND"] = str(round_index)
 
                 if phase == PHASE_RL:
-                    rl_module = self._one_phase(phases, AdaptiveVagenWrapper)
+                    rl_module = self._one_phase(phases, AdaptiveSlimeWrapper)
                     output = self._run_or_resume(rl_module)
                     if not output.model_path:
                         raise RuntimeError("adaptive RL completed without a model output")
@@ -254,9 +254,9 @@ class AdaptiveGraphRLController(GraphRLController):
         phases = super()._build_phases(round_index, iter_dir, iter_config, current_model)
         adapted: list[Phase] = []
         for module in phases:
-            if isinstance(module, VagenWrapper):
+            if isinstance(module, SlimeWrapper):
                 adapted.append(
-                    AdaptiveVagenWrapper(
+                    AdaptiveSlimeWrapper(
                         config=module.config,
                         input_paths=module.input_paths,
                         output_paths=module.output_paths,
@@ -300,14 +300,11 @@ class AdaptiveGraphRLController(GraphRLController):
             )
         rl_override["training_steps"] = round_horizon
 
-        hydra_overrides = copy.deepcopy(rl_override.get("hydra_overrides") or {})
-        trainer = copy.deepcopy(hydra_overrides.get("trainer") or {})
-        trainer["test_freq"] = self.adaptive_config["eval_every_steps"]
-        trainer["save_freq"] = self.adaptive_config["eval_every_steps"]
-        trainer["val_before_train"] = True
-        trainer["save_best_val"] = False
-        hydra_overrides["trainer"] = trainer
-        rl_override["hydra_overrides"] = hydra_overrides
+        slime = copy.deepcopy(rl_override.get("slime") or {})
+        slime["eval_interval"] = self.adaptive_config["eval_every_steps"]
+        slime["save_interval"] = self.adaptive_config["eval_every_steps"]
+        slime["train_script"] = "graphrl/slime/train_adaptive.py"
+        rl_override["slime"] = slime
         iter_config["rl"] = rl_override
 
         logger.info(
@@ -326,7 +323,7 @@ class AdaptiveGraphRLController(GraphRLController):
         return self._run_module(module)
 
     def _ensure_rl_output(self, phases: list[Phase]) -> None:
-        rl_module = self._one_phase(phases, AdaptiveVagenWrapper)
+        rl_module = self._one_phase(phases, AdaptiveSlimeWrapper)
         if not rl_module.is_already_complete():
             raise RuntimeError(
                 "adaptive state advanced past RL, but its round-best model "
@@ -516,7 +513,7 @@ class AdaptiveGraphRLController(GraphRLController):
         if current_round is None:
             candidates = list(
                 self.experiment_dir.glob(
-                    "iter_*/rl/verl_checkpoints/global_step_*/adaptive_schedule_state.json"
+                    "iter_*/rl/slime_checkpoints/iter_*/adaptive_schedule_state.json"
                 )
             )
             candidates.extend(
@@ -527,8 +524,8 @@ class AdaptiveGraphRLController(GraphRLController):
         else:
             candidates = list(
                 self.experiment_dir.glob(
-                    f"iter_{current_round:03d}/rl/verl_checkpoints/"
-                    "global_step_*/adaptive_schedule_state.json"
+                    f"iter_{current_round:03d}/rl/slime_checkpoints/"
+                    "iter_*/adaptive_schedule_state.json"
                 )
             )
             candidates.extend(
@@ -555,14 +552,14 @@ class AdaptiveGraphRLController(GraphRLController):
                     # A best snapshot intentionally contains only HF model weights
                     # and controller metadata. Once RL has taken a train step it is
                     # not an exact resume point: optimizer, scheduler, dataloader and
-                    # RNG state exist only in a regular verl checkpoint.
+                    # RNG state exist only in a regular SLIME checkpoint.
                     if state.get("phase") == PHASE_RL and candidate_step > 0:
                         continue
                     if not is_complete_snapshot(path.parent):
                         continue
-                if "verl_checkpoints" in path.parts:
+                if "slime_checkpoints" in path.parts:
                     checkpoint = path.parent
-                    checkpoint_step = int(checkpoint.name.rsplit("_", 1)[-1])
+                    checkpoint_step = int(checkpoint.name.rsplit("_", 1)[-1]) + 1
                     checkpoint_round = int(checkpoint.parents[2].name[5:])
                     checkpoint_rollouts = (
                         self.experiment_dir
@@ -579,14 +576,8 @@ class AdaptiveGraphRLController(GraphRLController):
                         )
                         if checkpoint_required_rollouts > checkpoint_rollout_prefix:
                             continue
-                    if not (checkpoint / "data.pt").is_file() or not (
-                        checkpoint / "actor"
-                    ).is_dir():
-                        continue
                     manifest = checkpoint / CHECKPOINT_MANIFEST
-                    if manifest.exists() and not is_complete_checkpoint_manifest(
-                        checkpoint
-                    ):
+                    if not manifest.exists() or not is_complete_checkpoint_manifest(checkpoint):
                         continue
                 key = (
                     int(state.get("total_rl_steps", 0)),
@@ -599,6 +590,32 @@ class AdaptiveGraphRLController(GraphRLController):
         if valid:
             _, checkpoint_dir = max(valid, key=lambda item: item[0])
             restored = self.store.restore_from(checkpoint_dir)
+            recovered_round = int(restored.get("round", 0))
+            recovered_step = int(
+                (restored.get("steps_by_round") or {}).get(
+                    str(recovered_round), restored.get("decision_step") or 0
+                )
+            )
+            if "slime_checkpoints" in checkpoint_dir.parts:
+                checkpoint_root = checkpoint_dir.parent
+                rollout_id = int(checkpoint_dir.name.rsplit("_", 1)[-1])
+                tracker = checkpoint_root / "latest_checkpointed_iteration.txt"
+                temporary = tracker.with_name(f".{tracker.name}.tmp")
+                temporary.write_text(str(rollout_id), encoding="utf-8")
+                os.replace(temporary, tracker)
+            else:
+                # A step-0 model snapshot is not a full optimizer/RNG resume
+                # point. Ensure SLIME starts the round cold from that model.
+                tracker = (
+                    self.experiment_dir
+                    / f"iter_{recovered_round:03d}"
+                    / "rl"
+                    / "slime_checkpoints"
+                    / "latest_checkpointed_iteration.txt"
+                )
+                tracker.unlink(missing_ok=True)
+                rollout_id = -1
+            self._prune_slime_checkpoints_after(recovered_round, rollout_id)
             if root_state is None:
                 logger.warning(
                     "[adaptive] recovered missing root state from %s", checkpoint_dir
@@ -608,14 +625,9 @@ class AdaptiveGraphRLController(GraphRLController):
                     "[adaptive] reconciled root state to committed checkpoint %s",
                     checkpoint_dir,
                 )
-            if rollback_for_rollouts and current_round is not None:
-                restored_step = int(
-                    (restored.get("steps_by_round") or {}).get(
-                        str(current_round), restored.get("decision_step") or 0
-                    )
-                )
-                self._clear_round_outputs_after_rl_rollback(current_round)
-                self._prune_rollouts_after(current_round, restored_step)
+            if root_state is None or restored != root_state or rollback_for_rollouts:
+                self._clear_round_outputs_after_rl_rollback(recovered_round)
+                self._prune_rollouts_after(recovered_round, recovered_step)
             return
 
         if root_state is None and any(self.experiment_dir.glob("iter_*")):
@@ -668,7 +680,7 @@ class AdaptiveGraphRLController(GraphRLController):
     def _clear_round_outputs_after_rl_rollback(self, round_index: int) -> None:
         iter_dir = self.experiment_dir / f"iter_{round_index:03d}"
         for path in (
-            iter_dir / "rl" / ".adaptive_rl_done.json",
+            iter_dir / "rl" / ".slime_rl_done.json",
             iter_dir / "rl" / "rl_model",
             iter_dir / "traj_to_sft",
             iter_dir / "sft",
@@ -698,6 +710,36 @@ class AdaptiveGraphRLController(GraphRLController):
                 path.unlink(missing_ok=True)
             elif path.is_dir():
                 shutil.rmtree(path)
+
+    def _prune_slime_checkpoints_after(
+        self, round_index: int, rollout_id: int
+    ) -> None:
+        rl_dir = self.experiment_dir / f"iter_{round_index:03d}" / "rl"
+        checkpoint_root = rl_dir / "slime_checkpoints"
+        for base in (checkpoint_root, checkpoint_root / "critic"):
+            for path in base.glob("iter_*"):
+                try:
+                    candidate = int(path.name.rsplit("_", 1)[-1])
+                except ValueError:
+                    continue
+                if candidate > rollout_id:
+                    shutil.rmtree(path, ignore_errors=True)
+        for path in (checkpoint_root / "rollout").glob(
+            "global_dataset_state_dict_*.pt"
+        ):
+            try:
+                candidate = int(path.stem.rsplit("_", 1)[-1])
+            except ValueError:
+                continue
+            if candidate > rollout_id:
+                path.unlink(missing_ok=True)
+        for path in (rl_dir / "hf_checkpoints").glob("rollout_*"):
+            try:
+                candidate = int(path.name.rsplit("_", 1)[-1])
+            except ValueError:
+                continue
+            if candidate > rollout_id:
+                shutil.rmtree(path, ignore_errors=True)
 
     def _global_best_model(self) -> str | None:
         path = self.experiment_dir / "best_val_run" / "actor" / "huggingface"
