@@ -1,6 +1,6 @@
 # Vendored VAGEN-SLIME
 
-`GraphRL/VAGEN` replaces the legacy VAGEN/VERL tree with a source snapshot of:
+`GraphRL/VAGEN-SLIME` replaces the legacy VAGEN/VERL tree with a source snapshot of:
 
 - `JamesKrW/VAGEN-SLIME` at `056e139`
 - its `JamesKrW/slime` dependency at `b533d81`
@@ -13,7 +13,7 @@ fixes required by the validated synchronous PPO and resume path.
 
 ## Local patch boundary
 
-The project-specific code is outside `GraphRL/VAGEN`:
+The project-specific code is outside `GraphRL/VAGEN-SLIME`:
 
 - `GraphRL/examples/viewsuite/.../slime/`: launch and experiment configuration
 - `GraphRL/graphrl/slime/`: environment-registration seam

@@ -1,12 +1,12 @@
 # GraphRL on VAGEN-SLIME
 
 This checkout uses **VAGEN-SLIME** for both the environment harness and RL
-training. `GraphRL/VAGEN` is the vendored VAGEN-SLIME source tree; ViewAgent
+training. `GraphRL/VAGEN-SLIME` is the vendored VAGEN-SLIME source tree; ViewAgent
 integration code stays outside it.
 
 The ownership boundary is:
 
-- `GraphRL/VAGEN/`: generic VAGEN-SLIME evaluator, harness and SLIME trainer.
+- `GraphRL/VAGEN-SLIME/`: generic VAGEN-SLIME evaluator, harness and SLIME trainer.
 - `view_suite/envs/slime_adapter.py`: adapters for the nine ViewSuite task/env
   combinations.
 - `view_suite/evaluation/`: compatibility loader and provider backends for the
@@ -224,7 +224,7 @@ The fast migration checks are:
 ```bash
 cd /path/to/ViewAgent-slime
 
-env PYTHONPATH="$PWD:$PWD/GraphRL:$PWD/GraphRL/VAGEN:$PWD/GraphRL/VAGEN/slime" \
+env PYTHONPATH="$PWD:$PWD/GraphRL:$PWD/GraphRL/VAGEN-SLIME:$PWD/GraphRL/VAGEN-SLIME/slime" \
   ../conda_envs/slime/bin/python -m pytest \
   GraphRL/tests view_suite/habitat_gs/tests -q
 
