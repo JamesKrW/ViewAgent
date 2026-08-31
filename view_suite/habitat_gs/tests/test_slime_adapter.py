@@ -7,7 +7,7 @@ from typing import ClassVar
 
 VIEWAGENT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(VIEWAGENT_ROOT))
-sys.path.insert(0, str(VIEWAGENT_ROOT / "GraphRL/VAGEN"))
+sys.path.insert(0, str(VIEWAGENT_ROOT / "GraphRL/VAGEN-SLIME"))
 
 from vagen_agent.envs import BaseNoConcatEnv, build_env
 from vagen_agent.envs import get_env_cls

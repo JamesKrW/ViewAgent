@@ -1,6 +1,6 @@
 """Habitat-GS IVP on the vendored synchronous VAGEN-SLIME backend.
 
-The heavy launcher and checkpoint semantics stay in ``GraphRL/VAGEN``.  This
+The heavy launcher and checkpoint semantics stay in ``GraphRL/VAGEN-SLIME``.  This
 ViewAgent-owned file supplies only Habitat-GS paths/defaults and makes the local
 ``view_suite`` package visible to Ray workers.
 
@@ -21,7 +21,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 GRAPHRL_ROOT = HERE.parents[3]
 VIEWAGENT_ROOT = GRAPHRL_ROOT.parent
-VAGEN_SLIME_ROOT = GRAPHRL_ROOT / "VAGEN"
+VAGEN_SLIME_ROOT = GRAPHRL_ROOT / "VAGEN-SLIME"
 sys.path.insert(0, str(VAGEN_SLIME_ROOT))
 sys.path.insert(0, str(VAGEN_SLIME_ROOT / "slime"))
 
@@ -102,7 +102,8 @@ def main(cfg: Config) -> None:
             megatron_root = fallback
         else:
             raise SystemExit(
-                "Megatron-LM is missing; run GraphRL/VAGEN/scripts/build_slime_env.sh"
+                "Megatron-LM is missing; run "
+                "GraphRL/VAGEN-SLIME/scripts/build_slime_env.sh"
             )
     inherited = os.environ.get("PYTHONPATH", "")
     os.environ["PYTHONPATH"] = ":".join(

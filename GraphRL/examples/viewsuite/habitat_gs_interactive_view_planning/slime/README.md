@@ -1,6 +1,6 @@
 # Habitat-GS IVP on synchronous SLIME
 
-This ViewAgent-owned entry point uses the vendored ``GraphRL/VAGEN``
+This ViewAgent-owned entry point uses the vendored ``GraphRL/VAGEN-SLIME``
 (VAGEN-SLIME) backend. The environment implementation and its thin Gymnasium
 adapter remain under ``view_suite``; SLIME owns rollout, PPO, model weight
 synchronization, checkpointing, and resume.

@@ -8,12 +8,9 @@ extras = {
         "hydra-core>=1.3.2,<1.4",
         "omegaconf>=2.3,<2.4",
 
-        # OpenAI-compatible clients (OpenAI/Azure/Together/vLLM/sglang all reuse this SDK)
-        "openai>=1.40.0,<2",
-
-        # Closed-source providers
-        "anthropic>=0.34.0,<1",          # Claude (AsyncAnthropic)
-        "google-generativeai>=0.7.2,<1", # Gemini
+        # Provider adapters use one lightweight async HTTP transport. This
+        # deliberately avoids pinning an OpenAI SDK version against SLIME.
+        "httpx>=0.27",
 
         # Vision utilities for PIL <-> PNG data URLs
         "Pillow>=10.0.0,<12",

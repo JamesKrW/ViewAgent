@@ -25,7 +25,7 @@ from graphrl.slime.config import SlimeLaunchSpec
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-VAGEN_SLIME_ROOT = REPO_ROOT / "GraphRL" / "VAGEN"
+VAGEN_SLIME_ROOT = REPO_ROOT / "GraphRL" / "VAGEN-SLIME"
 
 
 def _wandb_run_id(spec: SlimeLaunchSpec) -> str:
