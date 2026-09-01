@@ -8,7 +8,7 @@ from view_suite.evaluation.config import load_legacy_config
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_vendored_backend_uses_unambiguous_vagen_slime_directory() -> None:
+def test_submodule_backend_uses_unambiguous_vagen_slime_directory() -> None:
     backend = REPO_ROOT / "GraphRL" / "VAGEN-SLIME"
     assert (backend / "vagen_agent").is_dir()
     assert (backend / "slime").is_dir()

@@ -1,4 +1,4 @@
-"""ViewAgent-owned integration seams for the vendored VAGEN-SLIME backend."""
+"""ViewAgent-owned integration seams for the pinned VAGEN-SLIME backend."""
 from graphrl.slime.config import SlimeLaunchSpec, build_launch_spec
 from graphrl.slime.adaptive_wrapper import AdaptiveSlimeWrapper
 from graphrl.slime.wrapper import SlimeWrapper

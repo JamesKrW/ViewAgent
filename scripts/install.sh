@@ -20,6 +20,16 @@ VAGEN_SLIME_DIR="${GRAPHRL_DIR}/VAGEN-SLIME"
 LF_DIR="${GRAPHRL_DIR}/LLaMA-Factory"
 SLIME_ENV_PREFIX="${SLIME_ENV_PREFIX:-${CONDA_PREFIX:-${REPO_ROOT}/../conda_envs/slime}}"
 
+if git -C "${REPO_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "${REPO_ROOT}" submodule update --init --recursive -- \
+        GraphRL/VAGEN-SLIME GraphRL/LLaMA-Factory
+fi
+
+if [ ! -f "${VAGEN_SLIME_DIR}/scripts/build_slime_env.sh" ] || [ ! -f "${LF_DIR}/pyproject.toml" ]; then
+    echo "Training submodules are missing; run: git submodule update --init --recursive" >&2
+    exit 1
+fi
+
 cat > "${REPO_ROOT}/.env" <<EOF
 export VIEWSUITE_ROOT="${VIEWSUITE_ROOT}"
 EOF
