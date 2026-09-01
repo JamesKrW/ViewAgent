@@ -38,6 +38,7 @@ MANIFEST
 /*.env
 /rollouts*/
 /exps/
+/runs/
 /tests/
 
 # ai2thor filter review artifacts + one-off finalize helper

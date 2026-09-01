@@ -20,6 +20,7 @@ is written for indoor furniture, and half of this corpus is outdoors.
         --data_root=$VIEWSUITE_ROOT/data/habitat_gs --workers=24 \
         --review_dir=$VIEWSUITE_ROOT/gs_filter_review
 """
+
 from __future__ import annotations
 
 import json
@@ -74,9 +75,13 @@ half is pavement -> KEEP.
 Answer with exactly one word: KEEP or FILTER."""
 
 
-def judge_image_cli(path: str, timeout: float = 180.0, max_retries: int = 3,
-                    judge_model: Optional[str] = None,
-                    prompt: Optional[str] = None) -> str:
+def judge_image_cli(
+    path: str,
+    timeout: float = 180.0,
+    max_retries: int = 3,
+    judge_model: Optional[str] = None,
+    prompt: Optional[str] = None,
+) -> str:
     """Judge one image by shelling out to VIEW_JUDGE_CMD. KEEP / FILTER / ERROR.
 
     Exists because an API key is not always available, while a site often provides a
@@ -95,15 +100,21 @@ def judge_image_cli(path: str, timeout: float = 180.0, max_retries: int = 3,
     if not _JUDGE_CMD:
         raise RuntimeError(
             "backend='cli' needs VIEW_JUDGE_CMD set to a vision-capable CLI, "
-            "or use --backend=openrouter with OPENROUTER_API")
+            "or use --backend=openrouter with OPENROUTER_API"
+        )
     cmd = _JUDGE_CMD.split() + ["-d", "-p"]
     if judge_model:
         cmd += ["-m", judge_model]
     cmd += ["-g", os.path.abspath(path), prompt or GS_FILTER_PROMPT]
     for attempt in range(max_retries):
         try:
-            out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                 text=True, timeout=timeout).stdout
+            out = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=timeout,
+            ).stdout
         except subprocess.TimeoutExpired:
             continue
         # The CLI streams; the verdict is the last non-empty line.
@@ -114,7 +125,7 @@ def judge_image_cli(path: str, timeout: float = 180.0, max_retries: int = 3,
                 return "FILTER"
             if "KEEP" in verdict:
                 return "KEEP"
-        time.sleep(2.0 * (2 ** attempt))
+        time.sleep(2.0 * (2**attempt))
     return "ERROR"
 
 
@@ -137,12 +148,14 @@ def _views_to_judge(data_root: str, suffix: str = "") -> Dict[str, List[str]]:
                 if not line:
                     continue
                 d = json.loads(line)
-                paths = {os.path.normpath(os.path.join(data_root, p))
-                         for p in d.get("image_path", [])
-                         # The top-down reference is a map, not a view to localise
-                         # from; it is rendered far off-manifold by construction and
-                         # would be filtered every time.
-                         if not p.endswith("top_down.png")}
+                paths = {
+                    os.path.normpath(os.path.join(data_root, p))
+                    for p in d.get("image_path", [])
+                    # The top-down reference is a map, not a view to localise
+                    # from; it is rendered far off-manifold by construction and
+                    # would be filtered every time.
+                    if not p.endswith("top_down.png")
+                }
                 out.setdefault(d["sample_id"], set()).update(paths)
     return {k: sorted(v) for k, v in out.items()}
 
@@ -169,20 +182,30 @@ def run(
     else:
         _RUBRIC = GS_FILTER_PROMPT
     if backend == "cli":
+
         def judge(p):
             return judge_image_cli(p, judge_model=judge_model, prompt=_RUBRIC)
+
         model = judge_model or f"{_JUDGE_CMD} default (UNPINNED -- not reproducible)"
-    else:
-        from view_suite.envs.ai2thor_proxy_task.data_gen import filter_low_semantic as _base
+    elif backend == "openrouter":
+        from view_suite.envs.ai2thor_proxy_task.data_gen import (
+            filter_low_semantic as _base,
+        )
+
         model = model or _base._DEFAULT_MODEL[backend]
-        auth = _base._openrouter_key() if backend == "openrouter" else _base._user_cert()
+        auth = _base._openrouter_key()
+
         def judge(p):  # noqa: E306
             return _base.judge_image(p, model, auth, backend=backend, prompt=_RUBRIC)
+    else:
+        raise ValueError("backend must be 'cli' or 'openrouter'")
 
     per_sample = _views_to_judge(data_root, suffix)
     uniq = sorted({p for ps in per_sample.values() for p in ps})
-    print(f"{len(per_sample)} samples, {len(uniq)} distinct views to judge "
-          f"({backend}/{model}, {workers} workers)")
+    print(
+        f"{len(per_sample)} samples, {len(uniq)} distinct views to judge "
+        f"({backend}/{model}, {workers} workers)"
+    )
 
     # Resume: judging this corpus is hours, and losing it to one interruption is not
     # acceptable. Verdicts are appended as they land and reloaded on restart.
@@ -207,36 +230,59 @@ def run(
             if i % 200 == 0:
                 rate = i / max(1e-6, time.time() - t0)
                 cache.flush()
-                print(f"  {i}/{len(todo)} judged, {rate:.1f}/s, "
-                      f"~{(len(todo) - i) / max(1e-6, rate) / 60:.0f} min left", flush=True)
+                print(
+                    f"  {i}/{len(todo)} judged, {rate:.1f}/s, "
+                    f"~{(len(todo) - i) / max(1e-6, rate) / 60:.0f} min left",
+                    flush=True,
+                )
 
     n_err = sum(1 for v in verdicts.values() if v == "ERROR")
     n_filter = sum(1 for v in verdicts.values() if v == "FILTER")
-    print(f"views: KEEP={len(verdicts) - n_filter - n_err} FILTER={n_filter} ERROR={n_err}")
+    print(
+        f"views: KEEP={len(verdicts) - n_filter - n_err} FILTER={n_filter} ERROR={n_err}"
+    )
 
     # Who judged this corpus, written next to it. Without this the dataset carries no
     # record of what screened it, and "we filtered it with a VLM" is not a provenance.
     with open(os.path.join(data_root, f"_filter_provenance{suffix}.json"), "w") as f:
-        json.dump({"backend": backend, "model": model, "workers": workers,
-                   "views_judged": len(verdicts), "views_filtered": n_filter,
-                   "views_error": n_err, "prompt": GS_FILTER_PROMPT}, f, indent=2)
+        json.dump(
+            {
+                "backend": backend,
+                "model": model,
+                "workers": workers,
+                "views_judged": len(verdicts),
+                "views_filtered": n_filter,
+                "views_error": n_err,
+                "prompt": GS_FILTER_PROMPT,
+            },
+            f,
+            indent=2,
+        )
     if n_err:
         # A view with no verdict is not evidence of quality. Keeping it silently is how
         # a rate-limited run turns into a dataset nobody screened.
-        print(f"[warn] {n_err} views got no verdict; their samples are kept. "
-              f"Re-run to judge them.")
+        print(
+            f"[warn] {n_err} views got no verdict; their samples are kept. "
+            f"Re-run to judge them."
+        )
 
-    drop: Set[str] = {sid for sid, ps in per_sample.items()
-                      if any(verdicts.get(p) == "FILTER" for p in ps)}
-    print(f"dropping {len(drop)}/{len(per_sample)} samples "
-          f"({100.0 * len(drop) / max(1, len(per_sample)):.1f}%)")
+    drop: Set[str] = {
+        sid
+        for sid, ps in per_sample.items()
+        if any(verdicts.get(p) == "FILTER" for p in ps)
+    }
+    print(
+        f"dropping {len(drop)}/{len(per_sample)} samples "
+        f"({100.0 * len(drop) / max(1, len(per_sample)):.1f}%)"
+    )
 
     if review_dir:
         os.makedirs(review_dir, exist_ok=True)
         for path, v in verdicts.items():
             if v == "FILTER":
-                shutil.copy(path, os.path.join(
-                    review_dir, "__".join(path.split(os.sep)[-3:])))
+                shutil.copy(
+                    path, os.path.join(review_dir, "__".join(path.split(os.sep)[-3:]))
+                )
         print(f"filtered views copied to {review_dir} for eyeballing")
 
     if dry_run:

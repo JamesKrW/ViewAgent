@@ -36,7 +36,7 @@ import os
 import random
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from PIL import Image
@@ -246,36 +246,47 @@ def _render_topdown_mapview(controller: Controller) -> Tuple[np.ndarray, Dict]:
     Render top-down via AI2-THOR's canonical map-view camera.
 
     Flow:
-      1) GetMapViewCameraProperties -> position, rotation, orthographicSize, orthographic=True
-      2) AddThirdPartyCamera (orthographic=True, using those props) -> cam index 1
-      3) Grab third_party_camera_frames[1]
-      4) Leave the camera attached; scene reset will clear it on next iteration
+      1) ToggleMapView to hide the ceiling.
+      2) GetMapViewCameraProperties -> canonical orthographic camera.
+      3) AddThirdPartyCamera and grab its newest frame.
+      4) Restore the ceiling; scene reset later clears the attached camera.
 
     Returns (rgb, top_down_pose_dict). The rgb is RGBA if AI2-THOR returned
     alpha — caller is expected to drop the alpha channel if needed.
     """
-    ev = controller.step(action="GetMapViewCameraProperties")
-    props = ev.metadata.get("actionReturn") or {}
-    pos = dict(props.get("position", {"x": 0.0, "y": 2.5, "z": 0.0}))
-    rot = dict(props.get("rotation", {"x": 90.0, "y": 0.0, "z": 0.0}))
-    orthographic = bool(props.get("orthographic", True))
-    ortho_size = float(props.get("orthographicSize", 3.0))
-    fov = float(props.get("fieldOfView", 90.0))
+    # GetMapViewCameraProperties only supplies the camera. It does not hide the
+    # ceiling, so some scenes (notably FloorPlan23) produce a perfectly sharp image
+    # of the roof instead of the room. ToggleMapView is AI2-THOR's supported ceiling
+    # toggle. Restore it immediately after capture so normal episode renders retain
+    # the scene's original geometry.
+    toggle = controller.step(action="ToggleMapView")
+    ceiling_hidden = bool(toggle.metadata.get("lastActionSuccess", False))
+    try:
+        ev = controller.step(action="GetMapViewCameraProperties")
+        props = ev.metadata.get("actionReturn") or {}
+        pos = dict(props.get("position", {"x": 0.0, "y": 2.5, "z": 0.0}))
+        rot = dict(props.get("rotation", {"x": 90.0, "y": 0.0, "z": 0.0}))
+        orthographic = bool(props.get("orthographic", True))
+        ortho_size = float(props.get("orthographicSize", 3.0))
+        fov = float(props.get("fieldOfView", 90.0))
 
-    controller.step(
-        action="AddThirdPartyCamera",
-        position=pos,
-        rotation=rot,
-        fieldOfView=fov,
-        orthographic=orthographic,
-        orthographicSize=ortho_size,
-    )
-    frames = controller.last_event.third_party_camera_frames
-    if not frames or len(frames) < 2:
-        raise RuntimeError("Top-down third-party camera frame not available")
-    rgb = np.asarray(frames[-1])
-    if rgb.ndim == 3 and rgb.shape[2] == 4:
-        rgb = rgb[..., :3]
+        controller.step(
+            action="AddThirdPartyCamera",
+            position=pos,
+            rotation=rot,
+            fieldOfView=fov,
+            orthographic=orthographic,
+            orthographicSize=ortho_size,
+        )
+        frames = controller.last_event.third_party_camera_frames
+        if not frames:
+            raise RuntimeError("Top-down third-party camera frame not available")
+        rgb = np.asarray(frames[-1])
+        if rgb.ndim == 3 and rgb.shape[2] == 4:
+            rgb = rgb[..., :3]
+    finally:
+        if ceiling_hidden:
+            controller.step(action="ToggleMapView")
 
     cam_pose = {"position": pos, "rotation": rot}
     return rgb, cam_pose

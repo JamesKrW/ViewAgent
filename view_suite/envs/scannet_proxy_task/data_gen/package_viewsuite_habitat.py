@@ -22,10 +22,10 @@ import argparse
 import json
 import os
 import shutil
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Iterator
-
+from typing import Any
 
 TASK_SPLITS = ("train", "dev", "test")
 
@@ -267,17 +267,36 @@ def materialize_intermediate(
                 materializer.add(base_root / normalized, normalized)
                 base_image_references += 1
             _copy_sample_sidecars(materializer, base_root, row)
-            for relative in _flatten_intermediate_paths(
-                row["intermediate_image_path"]
-            ):
+            for relative in _flatten_intermediate_paths(row["intermediate_image_path"]):
                 normalized = _normalized_relative_path(relative)
                 materializer.add(intermediate_root / normalized, normalized)
                 intermediate_references += 1
 
-    pose_index_name = "pose_index_p2v.jsonl" if task == "path_to_view" else "pose_index_v2p.jsonl"
+    pose_index_name = (
+        "pose_index_p2v.jsonl" if task == "path_to_view" else "pose_index_v2p.jsonl"
+    )
     pose_index = intermediate_root / pose_index_name
     if pose_index.is_file():
         materializer.add(pose_index, pose_index_name)
+
+    base_promotion_manifest = base_root / "top_down_promotion.json"
+    intermediate_promotion_manifest = intermediate_root / "top_down_promotion.json"
+    if intermediate_promotion_manifest.is_file():
+        # The primary report must describe the JSONLs in this intermediate
+        # dataset.  Keep the base report as separate provenance for the
+        # top-down images and sample sidecars copied from ``base_root``.
+        materializer.add(
+            intermediate_promotion_manifest,
+            "top_down_promotion.json",
+        )
+        if base_promotion_manifest.is_file():
+            materializer.add(
+                base_promotion_manifest,
+                "top_down_base_promotion.json",
+            )
+    elif base_promotion_manifest.is_file():
+        # Older intermediate trees may not have their own promotion report.
+        materializer.add(base_promotion_manifest, "top_down_promotion.json")
 
     kind = "p2v-intermediate" if task == "path_to_view" else "v2p-intermediate"
     _write_readme(destination, kind)
@@ -361,9 +380,9 @@ def main() -> None:
     standalone_root.mkdir(parents=True, exist_ok=False)
 
     outputs = {
-        "base": standalone_root / "viewsuite15k-habbita",
-        "p2v": standalone_root / "viewsuite15k-habbita-p2v-intermediate",
-        "v2p": standalone_root / "viewsuite15k-habbita-v2p-intermediate",
+        "base": standalone_root / "viewsuite_15k_habitat",
+        "p2v": standalone_root / "viewsuite_15k_habitat_p2v_intermediate",
+        "v2p": standalone_root / "viewsuite_15k_habitat_v2p_intermediate",
     }
     summaries = {
         "base": materialize_base(base_root, outputs["base"]),
