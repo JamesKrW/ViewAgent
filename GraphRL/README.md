@@ -1,12 +1,13 @@
 # GraphRL on VAGEN-SLIME
 
 This checkout uses **VAGEN-SLIME** for both the environment harness and RL
-training. `GraphRL/VAGEN-SLIME` is the vendored VAGEN-SLIME source tree; ViewAgent
-integration code stays outside it.
+training. `GraphRL/VAGEN-SLIME` and `GraphRL/LLaMA-Factory` are pinned Git
+submodules; ViewAgent integration code stays outside them.
 
 The ownership boundary is:
 
 - `GraphRL/VAGEN-SLIME/`: generic VAGEN-SLIME evaluator, harness and SLIME trainer.
+- `GraphRL/LLaMA-Factory/`: the pinned SFT backend.
 - `view_suite/envs/slime_adapter.py`: adapters for the nine ViewSuite task/env
   combinations.
 - `view_suite/evaluation/`: compatibility loader and provider backends for the
@@ -23,8 +24,10 @@ No shipped script invokes the removed `vagen.main_ppo`/verl path.
 Build the VAGEN-SLIME environment once:
 
 ```bash
-cd /path/to/ViewAgent-slime/GraphRL
-bash VAGEN/scripts/build_slime_env.sh
+cd /path/to/ViewAgent
+git submodule update --init --recursive
+cd GraphRL
+bash VAGEN-SLIME/scripts/build_slime_env.sh
 ```
 
 The example scripts source `examples/_slime_env.sh`. It selects the adjacent
@@ -44,7 +47,7 @@ VIEWSUITE_ROOT=/path/to/assets bash examples/viewsuite/.../run.sh
 All scripts under `GraphRL/examples` now launch VAGEN-SLIME:
 
 ```bash
-cd /path/to/ViewAgent-slime/GraphRL
+cd /path/to/ViewAgent/GraphRL
 
 # Fixed schedules
 bash examples/sokoban/sokoban_text/run.sh
@@ -222,7 +225,7 @@ existing directory and resume contract.
 The fast migration checks are:
 
 ```bash
-cd /path/to/ViewAgent-slime
+cd /path/to/ViewAgent
 
 env PYTHONPATH="$PWD:$PWD/GraphRL:$PWD/GraphRL/VAGEN-SLIME:$PWD/GraphRL/VAGEN-SLIME/slime" \
   ../conda_envs/slime/bin/python -m pytest \

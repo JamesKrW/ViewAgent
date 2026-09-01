@@ -1,7 +1,0 @@
-# name -> class path. Adding an environment is one line here plus a BaseEnv subclass.
-#
-# Local environments stay deliberately small. RemoteEnv is the generic process/host
-# boundary: environment-specific services depend only on the envs.remote handler API.
-env_registry:
-  Sokoban: vagen_agent.envs.sokoban.Sokoban
-  RemoteEnv: vagen_agent.envs.remote.RemoteEnv

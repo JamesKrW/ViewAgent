@@ -56,7 +56,7 @@ def _megatron_source_root() -> Path:
             return candidate.resolve()
     expected = VAGEN_SLIME_ROOT / "build" / "Megatron-LM"
     raise RuntimeError(
-        "Megatron-LM is not built for the vendored VAGEN-SLIME checkout. Run "
+        "Megatron-LM is not built for the pinned VAGEN-SLIME checkout. Run "
         f"`bash {VAGEN_SLIME_ROOT / 'scripts' / 'build_slime_env.sh'}` or set "
         f"VAGEN_SLIME_MEGATRON_ROOT; expected {expected}"
     )

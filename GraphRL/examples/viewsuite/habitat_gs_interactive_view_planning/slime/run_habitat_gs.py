@@ -1,4 +1,4 @@
-"""Habitat-GS IVP on the vendored synchronous VAGEN-SLIME backend.
+"""Habitat-GS IVP on the pinned synchronous VAGEN-SLIME backend.
 
 The heavy launcher and checkpoint semantics stay in ``GraphRL/VAGEN-SLIME``.  This
 ViewAgent-owned file supplies only Habitat-GS paths/defaults and makes the local

@@ -85,9 +85,12 @@ ViewSuite/
 Used on the machine that runs RL/SFT training and the eval harness.
 
 ```bash
-# Clone the repository (GitHub repo: mll-lab-nu/ViewAgent)
-git clone https://github.com/mll-lab-nu/ViewAgent.git ViewSuite
+# Clone the repository and its pinned training backends
+git clone --recurse-submodules https://github.com/mll-lab-nu/ViewAgent.git ViewSuite
 cd ViewSuite
+
+# For an existing checkout, initialize/update the same pinned revisions with:
+git submodule update --init --recursive
 
 # Create env (Python 3.12)
 conda create -n viewsuite python=3.12 -y
