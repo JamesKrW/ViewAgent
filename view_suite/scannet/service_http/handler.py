@@ -5,6 +5,7 @@ Handles 3D scene rendering using mesh renderers with GPU support.
 
 Concurrency control is delegated to the service layer via UNIFIED_MAX_INFLIGHT env var.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -65,8 +66,8 @@ def _bind_process_to_gpu(gpu_id: Optional[int], backend: str = "") -> None:
     global _WORKER_GPU_ID
     if gpu_id is None:
         return
-    _WORKER_GPU_ID = int(gpu_id)                          # habitat needs the PHYSICAL id
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)      # CUDA (torch, gsplat)
+    _WORKER_GPU_ID = int(gpu_id)  # habitat needs the PHYSICAL id
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)  # CUDA (torch, gsplat)
     if backend in ("habitat", "habitat_gs"):
         # Scoped to the habitat backends deliberately: these are inert for Filament and
         # for this
@@ -74,15 +75,18 @@ def _bind_process_to_gpu(gpu_id: Optional[int], backend: str = "") -> None:
         # NVIDIA_VISIBLE_DEVICES is only consumed at container creation), so setting
         # them unconditionally would be an untested mutation on the working backends'
         # per-render hot path.
-        os.environ["NVIDIA_VISIBLE_DEVICES"] = str(gpu_id)   # container runtime masking
-        os.environ["EGL_DEVICE_ID"] = str(gpu_id)            # some EGL loaders read this
-        os.environ.setdefault("MAGNUM_DEVICE", str(gpu_id))  # habitat/Magnum device pick
+        os.environ["NVIDIA_VISIBLE_DEVICES"] = str(gpu_id)  # container runtime masking
+        os.environ["EGL_DEVICE_ID"] = str(gpu_id)  # some EGL loaders read this
+        os.environ.setdefault(
+            "MAGNUM_DEVICE", str(gpu_id)
+        )  # habitat/Magnum device pick
         # habitat renders through EGL and never touches torch, but importing torch here
         # would still create a CUDA context per worker — ~1GB of VRAM each, taken away
         # from the training job we are trying to co-locate with.
         return
     try:
         import torch
+
         torch.cuda.set_device(0)
     except Exception:
         pass
@@ -100,7 +104,7 @@ def _habitat_device_id() -> int:
     """
     vis = os.environ.get("CUDA_VISIBLE_DEVICES")
     if not vis:
-        return _WORKER_GPU_ID or 0          # unmasked: physical id is correct
+        return _WORKER_GPU_ID or 0  # unmasked: physical id is correct
     ids = [t.strip() for t in vis.split(",") if t.strip()]
     if _WORKER_GPU_ID is not None and str(_WORKER_GPU_ID) in ids:
         return ids.index(str(_WORKER_GPU_ID))
@@ -134,7 +138,9 @@ def _normalize_gpu_ids(value: Sequence[int] | str | int | None) -> list[int]:
     return out
 
 
-def _normalize_forced_size(value: Sequence[int] | int | str | None) -> Optional[Tuple[int, int]]:
+def _normalize_forced_size(
+    value: Sequence[int] | int | str | None,
+) -> Optional[Tuple[int, int]]:
     """
     Parse forced render size from various input formats.
 
@@ -162,8 +168,9 @@ def _normalize_forced_size(value: Sequence[int] | int | str | None) -> Optional[
     return (max(1, vals[0]), max(1, vals[1]))
 
 
-def _ensure_scene_loaded(scene_id: str, scene_root: str, backend: str,
-                         size: Optional[Tuple[int, int]] = None):
+def _ensure_scene_loaded(
+    scene_id: str, scene_root: str, backend: str, size: Optional[Tuple[int, int]] = None
+):
     """
     Keep one scene cached per process. Replace if scene_id changes.
 
@@ -191,7 +198,9 @@ def _ensure_scene_loaded(scene_id: str, scene_root: str, backend: str,
                 with contextlib.suppress(Exception):
                     _ACTIVE_RENDERER.close()
             # gsplat renderer exposes .release() directly
-            if hasattr(_ACTIVE_RENDERER, "release") and not hasattr(_ACTIVE_RENDERER, "mesh"):
+            if hasattr(_ACTIVE_RENDERER, "release") and not hasattr(
+                _ACTIVE_RENDERER, "mesh"
+            ):
                 with contextlib.suppress(Exception):
                     _ACTIVE_RENDERER.release()
             # mesh renderer wraps the offscreen renderer
@@ -205,6 +214,7 @@ def _ensure_scene_loaded(scene_id: str, scene_root: str, backend: str,
         # Load new scene
         if backend == "gsplat":
             from view_suite.scannet.render.gsplat_render import GaussianSplatRenderer
+
             ply_path = resolve_scene_gs_ply(scene_root, scene_id)
             renderer = GaussianSplatRenderer(ply_path)
         elif backend == "open3d":
@@ -213,18 +223,50 @@ def _ensure_scene_loaded(scene_id: str, scene_root: str, backend: str,
             # handler_ray -> actor -> mesh_render anyway. What makes the habitat env
             # work is mesh_render's own `except ImportError: o3d = None` guard.
             from view_suite.scannet.render.mesh_render import MeshRenderer
+
             ply_path = resolve_scene_ply(scene_root, scene_id)
             renderer = MeshRenderer(ply_path)
         elif backend == "habitat":
             from view_suite.scannet.render.habitat_render import HabitatRenderer
-            ply_path = resolve_scene_ply(scene_root, scene_id)   # same mesh as open3d
+
+            ply_path = resolve_scene_ply(scene_root, scene_id)  # same mesh as open3d
             # Build at the size we are about to render at. Habitat bakes resolution
             # into the sensor framebuffer, so constructing at the 512x512 class default
             # and then serving a differently sized request forces an immediate
             # close()+rebuild — i.e. every worker loaded its scene twice.
             w, h = size or (512, 512)
-            renderer = HabitatRenderer(ply_path, gpu_device_id=_habitat_device_id(),
-                                       width=w, height=h)
+            appearance = (
+                os.environ.get("SCANNET_HABITAT_APPEARANCE", "baked").strip().lower()
+            )
+            if appearance == "baked":
+                appearance_kwargs = {
+                    "lighting": False,
+                    "output_transfer": "srgb",
+                }
+            elif appearance == "legacy_lit":
+                appearance_kwargs = {
+                    "lighting": True,
+                    "output_transfer": "none",
+                }
+            elif appearance == "raw_unlit":
+                appearance_kwargs = {
+                    "lighting": False,
+                    "output_transfer": "none",
+                    "color_gain": (1.0, 1.0, 1.0),
+                    "perspective_exposure": 1.0,
+                }
+            else:
+                raise ValueError(
+                    "SCANNET_HABITAT_APPEARANCE must be one of "
+                    "baked, legacy_lit, or raw_unlit"
+                )
+            renderer = HabitatRenderer(
+                ply_path,
+                gpu_device_id=_habitat_device_id(),
+                width=w,
+                height=h,
+                **appearance_kwargs,
+            )
         elif backend == "habitat_gs":
             # Habitat-GS: same simulator, gaussian stage instead of a mesh, and a
             # different corpus layout (<root>/<split>/<scene>/<scene>.gs.ply), so the
@@ -233,15 +275,19 @@ def _ensure_scene_loaded(scene_id: str, scene_root: str, backend: str,
             # cannot live in the same interpreter.
             from view_suite.habitat_gs.habitat_gs_render import HabitatGSRenderer
             from view_suite.habitat_gs.scene_list import scene_navmesh, scene_ply
+
             w, h = size or (512, 512)
             renderer = HabitatGSRenderer(
                 scene_ply(scene_root, scene_id),
                 gpu_device_id=_habitat_device_id(),
-                width=w, height=h,
+                width=w,
+                height=h,
                 navmesh_path=scene_navmesh(scene_root, scene_id),
             )
         else:
-            raise ValueError(f"Unsupported backend={backend!r}; expected one of {SUPPORTED_BACKENDS}")
+            raise ValueError(
+                f"Unsupported backend={backend!r}; expected one of {SUPPORTED_BACKENDS}"
+            )
         _ACTIVE_RENDERER = renderer
         _ACTIVE_SCENE_ID = scene_id
         LOGGER.info("[ScanNetRender] Loaded %s renderer scene_id=%s", backend, scene_id)
@@ -308,12 +354,15 @@ def _render_images_worker(
             if mode == "cam_param":
                 K = np.array(task["intrinsics"], dtype=float)
                 T = np.array(task["extrinsics"], dtype=float)
-                img_array = renderer.render_image_from_cam_param(K, T, width=w, height=h)
+                img_array = renderer.render_image_from_cam_param(
+                    K, T, width=w, height=h
+                )
                 img_bytes = numpy_to_png_bytes(img_array.astype(np.uint8))
             else:
                 LOGGER.warning(
                     "[ScanNetRender/Worker] Unknown mode '%s' for task #%d; transparent image",
-                    mode, idx
+                    mode,
+                    idx,
                 )
                 img_bytes = numpy_to_png_bytes(np.zeros((h, w, 4), dtype=np.uint8))
         except Exception as exc:
@@ -337,6 +386,7 @@ class _WorkerSlot:
         current_scene: Scene ID currently loaded in this worker (for sticky dispatch)
         last_used: Timestamp of last use (for LRU eviction)
     """
+
     executor: ProcessPoolExecutor
     gpu_id: Optional[int]
     current_scene: Optional[str] = None
@@ -427,7 +477,9 @@ class _WorkerPool:
                 return idx
 
         # All workers busy: evict LRU
-        idx = min(range(len(self.worker_slots)), key=lambda i: self.worker_slots[i].last_used)
+        idx = min(
+            range(len(self.worker_slots)), key=lambda i: self.worker_slots[i].last_used
+        )
         prev = self.worker_slots[idx].current_scene
         if prev:
             self.scene_to_worker.pop(prev, None)
@@ -475,7 +527,9 @@ class _WorkerPool:
             self._metrics["broken_pool"] += 1
             LOGGER.error(
                 "[ScanNetRender] BrokenProcessPool on slot=%d gpu=%s; respawning after %.2fs",
-                idx, gpu_id, self.crash_cooldown_s
+                idx,
+                gpu_id,
+                self.crash_cooldown_s,
             )
 
             async with self._lock:
@@ -514,7 +568,8 @@ class _WorkerPool:
                 self._metrics["broken_pool_repeated"] += 1
                 LOGGER.error(
                     "[ScanNetRender] repeated BrokenProcessPool on slot=%d gpu=%s; giving up",
-                    idx, gpu_id
+                    idx,
+                    gpu_id,
                 )
                 raise
 
@@ -624,7 +679,9 @@ class ScanNetRenderHandler(BaseHandler):
 
         self._metrics: Counter[str] = Counter()
 
-    async def handle(self, meta: Dict[str, Any], images: List[Image.Image]) -> HandlerResult:
+    async def handle(
+        self, meta: Dict[str, Any], images: List[Image.Image]
+    ) -> HandlerResult:
         """
         Handle render request.
 
@@ -640,17 +697,11 @@ class ScanNetRenderHandler(BaseHandler):
 
         if not scene_id:
             LOGGER.error("[ScanNetRender] Missing scene_id in request")
-            return HandlerResult(
-                meta={"error": "Missing scene_id"},
-                images=[]
-            )
+            return HandlerResult(meta={"error": "Missing scene_id"}, images=[])
 
         if not isinstance(tasks, list):
             LOGGER.error("[ScanNetRender] Invalid tasks format")
-            return HandlerResult(
-                meta={"error": "Invalid tasks format"},
-                images=[]
-            )
+            return HandlerResult(meta={"error": "Invalid tasks format"}, images=[])
 
         LOGGER.info("[ScanNetRender] scene_id=%s tasks=%d", scene_id, len(tasks))
 
@@ -668,18 +719,12 @@ class ScanNetRenderHandler(BaseHandler):
         except FileNotFoundError as exc:
             self._metrics["not_found"] += 1
             LOGGER.error("[ScanNetRender] Scene not found: %s", exc)
-            return HandlerResult(
-                meta={"error": f"Scene not found: {exc}"},
-                images=[]
-            )
+            return HandlerResult(meta={"error": f"Scene not found: {exc}"}, images=[])
         except Exception as exc:
             tb = traceback.format_exc()
             LOGGER.error("[ScanNetRender] Internal error: %s\n%s", exc, tb)
             self._metrics["internal_error"] += 1
-            return HandlerResult(
-                meta={"error": "Internal rendering error"},
-                images=[]
-            )
+            return HandlerResult(meta={"error": "Internal rendering error"}, images=[])
 
     async def aclose(self) -> None:
         """Cleanup: shutdown worker pool."""

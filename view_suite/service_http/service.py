@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import os
 from contextlib import asynccontextmanager
+from typing import List, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
@@ -71,8 +72,8 @@ def build_app(handler: BaseHandler) -> FastAPI:
     @app.post("/render")
     async def render(
         request: Request,
-        meta: str | None = Form(default=None),
-        images: list[UploadFile] | None = File(default=None),  # noqa: B008
+        meta: Optional[str] = Form(default=None),
+        images: Optional[List[UploadFile]] = File(default=None),  # noqa: B008
     ):
         """
         Request (recommended):

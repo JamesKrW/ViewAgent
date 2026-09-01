@@ -10,22 +10,28 @@ from view_suite.scannet.render.mesh_render import MeshRenderer
 from view_suite.scannet.utils.path_utils import resolve_scene_ply
 from view_suite.service_http.async_client_routed import HRWRoutedAsyncUnifiedClient
 
-DEFAULT_CLIENT_OPEN_TIMEOUT = float(os.getenv("SCANNET_RENDER_CLIENT_OPEN_TIMEOUT", "60"))
+DEFAULT_CLIENT_OPEN_TIMEOUT = float(
+    os.getenv("SCANNET_RENDER_CLIENT_OPEN_TIMEOUT", "60")
+)
 DEFAULT_CLIENT_MAX_INFLIGHT = int(os.getenv("SCANNET_RENDER_CLIENT_MAX_INFLIGHT", "64"))
+
 
 @dataclass
 class RenderConfig:
-    render_backend: str                 # "local" | "client" | "habitat"
-    scannet_root: Optional[str] = None  # required for local; also used to resolve ply for client
-    client_url: Optional[str] = None    # required for client
+    render_backend: str  # "local" | "client" | "habitat"
+    scannet_root: Optional[str] = (
+        None  # required for local; also used to resolve ply for client
+    )
+    client_url: Optional[str] = None  # required for client
     client_origin: Optional[str] = None
-    scene_id: Optional[str] = None      # current scene
+    scene_id: Optional[str] = None  # current scene
     client_open_timeout: Optional[float] = None
     client_max_inflight: Optional[int] = None
     # habitat backend: renders in-process on an EXPLICIT gpu, unlike open3d/EGL
     # which always lands on device 0 regardless of CUDA_VISIBLE_DEVICES.
     gpu_device_id: int = 0
-    habitat_light_intensity: float = 2.5   # matches Open3D mean exposure
+    habitat_light_intensity: float = 2.5  # legacy lit-mode compatibility
+
 
 def _to_jsonable(x: Any) -> Any:
     if isinstance(x, np.ndarray):
@@ -38,6 +44,7 @@ def _to_jsonable(x: Any) -> Any:
         return [_to_jsonable(v) for v in x]
     return x
 
+
 def _ensure_K3x3(K: np.ndarray) -> np.ndarray:
     K = np.asarray(K)
     if K.shape == (4, 4):
@@ -46,16 +53,24 @@ def _ensure_K3x3(K: np.ndarray) -> np.ndarray:
         return K
     raise ValueError(f"Intrinsics must be 3x3 or 4x4; got {K.shape}")
 
+
 class UnifiedRender:
     """
-   unified renderer with lazy init and consistent return (PIL.Image).
-    - local: MeshRenderer
-    - client: HRWRoutedAsyncUnifiedClient (HTTP)
+    unified renderer with lazy init and consistent return (PIL.Image).
+     - local: MeshRenderer
+     - client: HRWRoutedAsyncUnifiedClient (HTTP)
     """
-    def __init__(self, render_backend: str, scannet_root: str | None,
-                 client_url: str | None, client_origin: str | None, scene_id: str | None,
-                 client_open_timeout: float | None = DEFAULT_CLIENT_OPEN_TIMEOUT,
-                 client_max_inflight: int | None = DEFAULT_CLIENT_MAX_INFLIGHT):
+
+    def __init__(
+        self,
+        render_backend: str,
+        scannet_root: str | None,
+        client_url: str | None,
+        client_origin: str | None,
+        scene_id: str | None,
+        client_open_timeout: float | None = DEFAULT_CLIENT_OPEN_TIMEOUT,
+        client_max_inflight: int | None = DEFAULT_CLIENT_MAX_INFLIGHT,
+    ):
         self.cfg = RenderConfig(
             render_backend,
             scannet_root,
@@ -126,6 +141,7 @@ class UnifiedRender:
         """Habitat-Sim renderer pinned to cfg.gpu_device_id (real multi-GPU isolation)."""
         if self._habitat is None:
             from view_suite.scannet.render.habitat_render import HabitatRenderer
+
             self._habitat = HabitatRenderer(
                 self._ensure_ply(),
                 gpu_device_id=int(self.cfg.gpu_device_id or 0),
@@ -146,21 +162,31 @@ class UnifiedRender:
         return img if isinstance(img, Image.Image) else Image.fromarray(img)
 
     # ------------- public APIs (match your names) -------------
-    async def render_image_from_cam_param(self, camera_intrinsics, camera_extrinsics, width=300, height=300) -> Image.Image:
+    async def render_image_from_cam_param(
+        self, camera_intrinsics, camera_extrinsics, width=300, height=300
+    ) -> Image.Image:
         if self.cfg.render_backend == "local":
-            img = self._ensure_local().render_image_from_cam_param(camera_intrinsics, camera_extrinsics, width, height)
+            img = self._ensure_local().render_image_from_cam_param(
+                camera_intrinsics, camera_extrinsics, width, height
+            )
             return self._to_pil(img)
         elif self.cfg.render_backend == "habitat":
-            img = self._ensure_habitat().render_image_from_cam_param(camera_intrinsics, camera_extrinsics, width, height)
+            img = self._ensure_habitat().render_image_from_cam_param(
+                camera_intrinsics, camera_extrinsics, width, height
+            )
             return self._to_pil(img)
         elif self.cfg.render_backend == "client":
             K = _ensure_K3x3(np.asarray(camera_intrinsics, dtype=np.float32))
             E = np.asarray(camera_extrinsics, dtype=np.float32)
 
-            tasks = [{"mode": "cam_param",
+            tasks = [
+                {
+                    "mode": "cam_param",
                     "intrinsics": _to_jsonable(K),
                     "extrinsics": _to_jsonable(E),
-                    "size": [int(width), int(height)]}]
+                    "size": [int(width), int(height)],
+                }
+            ]
             client = await self._ensure_client()
             meta = {
                 "scene_id": self.cfg.scene_id,
@@ -171,7 +197,6 @@ class UnifiedRender:
         else:
             raise ValueError(f"unknown backend: {self.cfg.render_backend}")
 
-
     # (optional) support direct forwarding a list of tasks
     async def render_tasks(self, tasks: List[Dict[str, Any]]) -> List[Image.Image]:
         if self.cfg.render_backend == "local":
@@ -179,7 +204,13 @@ class UnifiedRender:
             r = self._ensure_local()
             for t in tasks:
                 w, h = t.get("size", [300, 300])
-                out.append(self._to_pil(r.render_image_from_cam_param(t["intrinsics"], t["extrinsics"], w, h)))
+                out.append(
+                    self._to_pil(
+                        r.render_image_from_cam_param(
+                            t["intrinsics"], t["extrinsics"], w, h
+                        )
+                    )
+                )
             return out
         else:
             client = await self._ensure_client()

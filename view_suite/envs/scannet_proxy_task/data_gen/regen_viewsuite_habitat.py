@@ -403,6 +403,7 @@ class RawRenderClient:
         timeout_s: float,
         max_connections: int,
         retries: int,
+        verify_tls: bool,
     ):
         self.url = base_url.rstrip("/") + "/render"
         self.timeout_s = float(timeout_s)
@@ -413,6 +414,7 @@ class RawRenderClient:
                 max_connections=max_connections,
                 max_keepalive_connections=max_connections,
             ),
+            verify=verify_tls,
             trust_env=False,
         )
 
@@ -492,6 +494,7 @@ async def _render_registry(
     batch_size: int,
     timeout_s: float,
     retries: int,
+    verify_tls: bool,
 ) -> RenderProgress:
     grouped = registry.by_scene()
     progress = RenderProgress(total=len(registry))
@@ -501,6 +504,7 @@ async def _render_registry(
         timeout_s=timeout_s,
         max_connections=max(8, scene_concurrency * 2),
         retries=retries,
+        verify_tls=verify_tls,
     )
 
     async def render_scene(scene_id: str, specs: list[RenderSpec]) -> None:
@@ -918,10 +922,12 @@ async def _run_stage(args: argparse.Namespace, stage: str) -> dict[str, Any]:
         batch_size=args.batch_size,
         timeout_s=args.timeout,
         retries=args.retries,
+        verify_tls=not args.insecure_tls,
     )
     summary.update(
         {
             "client_url": args.client_url,
+            "renderer_appearance": args.renderer_appearance,
             "cached_poses": progress.cached,
             "rendered_poses": progress.rendered,
             "materialized_links": progress.materialized,
@@ -946,10 +952,21 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--p2v-out", default=str(p2v))
     parser.add_argument("--v2p-out", default=str(v2p))
     parser.add_argument("--client-url", default="http://127.0.0.1:8813")
+    parser.add_argument(
+        "--renderer-appearance",
+        choices=("baked", "legacy_lit", "raw_unlit"),
+        default=os.environ.get("SCANNET_HABITAT_APPEARANCE", "baked"),
+        help="Appearance profile configured on the render service; recorded as provenance.",
+    )
     parser.add_argument("--scene-concurrency", type=int, default=64)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--timeout", type=float, default=600.0)
     parser.add_argument("--retries", type=int, default=4)
+    parser.add_argument(
+        "--insecure-tls",
+        action="store_true",
+        help="Disable certificate verification for a trusted self-signed render service.",
+    )
     parser.add_argument("--limit-scenes", type=int, default=0)
     parser.add_argument("--limit-rows", type=int, default=0)
     return parser.parse_args()

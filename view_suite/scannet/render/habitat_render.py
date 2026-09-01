@@ -16,6 +16,7 @@ Requires the separate `habitat` conda env (habitat-sim 0.3.3 headless):
     conda create -y -n habitat python=3.9
     conda install -y -n habitat habitat-sim headless -c conda-forge -c aihabitat
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -61,13 +62,75 @@ def _geometry_from_K(K: np.ndarray, width: int, height: int):
     return hfov, max(1, int(round(height * fx / fy)))
 
 
+_BAKED_COLOR_GAIN = (1.0, 1.07, 1.16)
+_BAKED_PERSPECTIVE_EXPOSURE = 1.08
+_TOP_DOWN_ALIGNMENT_THRESHOLD = 0.95
+
+
+def _make_color_lut(
+    output_transfer: str, color_gain: Sequence[float]
+) -> Optional[np.ndarray]:
+    """Build a cheap output transform for ScanNet's baked vertex colours.
+
+    Habitat's lit material clips highlights before the RGB observation reaches
+    Python, so post-hoc exposure reduction cannot recover them.  The stable path is
+    unlit vertex colour followed by an sRGB-like display transform.  A 256-entry LUT
+    keeps that transform negligible on the per-frame hot path.
+    """
+    transfer = output_transfer.strip().lower()
+    gains = np.asarray(tuple(color_gain), dtype=np.float32)
+    if gains.shape != (3,) or not np.isfinite(gains).all() or np.any(gains <= 0):
+        raise ValueError("color_gain must contain three finite positive values")
+    if transfer == "none" and np.allclose(gains, 1.0):
+        return None
+    values = np.arange(256, dtype=np.float32) / 255.0
+    if transfer == "srgb":
+        values = np.where(
+            values <= 0.0031308,
+            12.92 * values,
+            1.055 * np.power(values, 1.0 / 2.4) - 0.055,
+        )
+    elif transfer != "none":
+        raise ValueError(
+            f"Unsupported output_transfer={output_transfer!r}; expected 'none' or 'srgb'"
+        )
+    return np.clip(values[:, None] * gains[None, :] * 255.0 + 0.5, 0.0, 255.0).astype(
+        np.uint8
+    )
+
+
+def _apply_color_lut(rgb: np.ndarray, lut: Optional[np.ndarray]) -> np.ndarray:
+    if lut is None:
+        return rgb
+    return np.stack([lut[rgb[..., channel], channel] for channel in range(3)], axis=-1)
+
+
+def _is_top_down_camera(
+    c2w: np.ndarray, threshold: float = _TOP_DOWN_ALIGNMENT_THRESHOLD
+) -> bool:
+    """Return whether an OpenCV camera looks almost straight down in ScanNet Z-up."""
+    forward = np.asarray(c2w, dtype=np.float64).reshape(4, 4)[:3, 2]
+    norm = float(np.linalg.norm(forward))
+    return norm > 0.0 and float(-forward[2] / norm) >= threshold
+
+
 class HabitatRenderer:
     """Renders a ScanNet mesh through Habitat-Sim on an explicitly chosen GPU."""
 
-    def __init__(self, file_path: str, gpu_device_id: int = 0,
-                 width: int = 512, height: int = 512, hfov_deg: float = 90.0,
-                 lighting: bool = True, light_intensity: float = 2.5,
-                 background=(1.0, 1.0, 1.0, 1.0)):
+    def __init__(
+        self,
+        file_path: str,
+        gpu_device_id: int = 0,
+        width: int = 512,
+        height: int = 512,
+        hfov_deg: float = 90.0,
+        lighting: bool = False,
+        light_intensity: float = 2.5,
+        output_transfer: Optional[str] = None,
+        color_gain: Optional[Sequence[float]] = None,
+        perspective_exposure: Optional[float] = None,
+        background=(1.0, 1.0, 1.0, 1.0),
+    ):
         import habitat_sim  # imported lazily: only the `habitat` env has it
 
         self._hs = habitat_sim
@@ -77,6 +140,22 @@ class HabitatRenderer:
         self._bg = tuple(background)
         self._lighting = bool(lighting)
         self._light_intensity = float(light_intensity)
+        if output_transfer is None:
+            output_transfer = "none" if self._lighting else "srgb"
+        if color_gain is None:
+            color_gain = (1.0, 1.0, 1.0) if self._lighting else _BAKED_COLOR_GAIN
+        if perspective_exposure is None:
+            perspective_exposure = (
+                1.0 if self._lighting else _BAKED_PERSPECTIVE_EXPOSURE
+            )
+        if not math.isfinite(perspective_exposure) or perspective_exposure <= 0:
+            raise ValueError("perspective_exposure must be finite and positive")
+        color_gain = tuple(color_gain)
+        self._color_lut = _make_color_lut(output_transfer, color_gain)
+        self._perspective_color_lut = _make_color_lut(
+            output_transfer,
+            tuple(gain * perspective_exposure for gain in color_gain),
+        )
         self._sim = None
         self._build()
 
@@ -85,7 +164,7 @@ class HabitatRenderer:
         hs = self._hs
         cfg = hs.SimulatorConfiguration()
         cfg.scene_id = self.file_path
-        cfg.gpu_device_id = self.gpu_device_id      # the whole point — real isolation
+        cfg.gpu_device_id = self.gpu_device_id  # the whole point — real isolation
         cfg.enable_physics = False
         # ScanNet meshes carry vertex colours and ship no lighting rig. NO_LIGHT_KEY
         # gives flat vertex-colour shading — correct but dark/flat. With lighting=True we
@@ -106,7 +185,7 @@ class HabitatRenderer:
         spec.sensor_type = hs.SensorType.COLOR
         spec.resolution = [self._h, self._w]
         spec.hfov = self._hfov
-        spec.position = [0.0, 0.0, 0.0]             # sensor at the agent origin
+        spec.position = [0.0, 0.0, 0.0]  # sensor at the agent origin
         # Match MeshRenderer, whose background defaults to WHITE (1,1,1,1).
         # Habitat clears to black by default, which alone made renders look ~5x
         # darker than Open3D in mean-pixel terms even where geometry matched.
@@ -125,16 +204,21 @@ class HabitatRenderer:
         """
         hs = self._hs
         I = self._light_intensity
+
         def L(vec, k):
-            return hs.gfx.LightInfo(vector=vec, color=[k * I, k * I, k * I],
-                                    model=hs.gfx.LightPositionModel.Global)
+            return hs.gfx.LightInfo(
+                vector=vec,
+                color=[k * I, k * I, k * I],
+                model=hs.gfx.LightPositionModel.Global,
+            )
+
         lights = [
-            L([0.0, 0.0, -1.0, 0.0], 1.0),   # key, from above (scene is Z-up)
+            L([0.0, 0.0, -1.0, 0.0], 1.0),  # key, from above (scene is Z-up)
             L([1.0, 0.0, -0.3, 0.0], 0.4),
             L([-1.0, 0.0, -0.3, 0.0], 0.4),
             L([0.0, 1.0, -0.3, 0.0], 0.4),
             L([0.0, -1.0, -0.3, 0.0], 0.4),
-            L([0.0, 0.0, 1.0, 0.0], 0.25),   # bounce from the floor
+            L([0.0, 0.0, 1.0, 0.0], 0.25),  # bounce from the floor
         ]
         self._sim.set_light_setup(lights, hs.gfx.DEFAULT_LIGHTING_KEY)
 
@@ -235,7 +319,7 @@ class HabitatRenderer:
         self._sim.get_agent(0).set_state(state, infer_sensor_states=False)
 
         rgb = np.asarray(self._sim.get_sensor_observations()["rgb"])
-        if rgb.ndim == 3 and rgb.shape[2] == 4:      # RGBA -> RGB
+        if rgb.ndim == 3 and rgb.shape[2] == 4:  # RGBA -> RGB
             rgb = rgb[:, :, :3]
         # Return an ndarray, NOT a PIL Image: BaseRenderer's contract is what
         # MeshRenderer does (`return np.asarray(pil)`), and the service calls
@@ -247,6 +331,13 @@ class HabitatRenderer:
         if rgb.shape[0] != int(height):
             # rendered at the fy-corrected height; resample to what the caller asked for
             from PIL import Image
+
             rgb = np.asarray(
-                Image.fromarray(rgb).resize((int(width), int(height)), Image.BILINEAR))
-        return rgb
+                Image.fromarray(rgb).resize((int(width), int(height)), Image.BILINEAR)
+            )
+        color_lut = (
+            self._color_lut
+            if _is_top_down_camera(c2w)
+            else self._perspective_color_lut
+        )
+        return _apply_color_lut(rgb, color_lut)

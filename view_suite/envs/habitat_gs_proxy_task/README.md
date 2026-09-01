@@ -115,6 +115,85 @@ landmarks as well as indoor furniture, because half of these scenes are outdoors
 The top-down reference is exempt: it is a map, rendered far off-manifold by
 construction, and judging it would filter every sample.
 
+### Human review of top-down references
+
+The browser reviewer scans AI2-THOR, ViewSuite/ScanNet, and Habitat-GS, including
+all P2V, V2P, and IVP JSONLs. It deduplicates repeated sample references by
+``(corpus, scene, content hash)`` and also includes scene-level top-down files
+that no longer occur in a filtered JSONL.
+
+```bash
+conda activate viewsuite
+python -m view_suite.envs.habitat_gs_proxy_task.data_gen.review_top_down
+```
+
+The command listens on ``127.0.0.1:8769`` by default. For a remote machine,
+forward that port with ``ssh -L 8769:127.0.0.1:8769 <host>`` and open
+``http://127.0.0.1:8769/`` locally. Use ``--host`` and ``--port`` to override it.
+Use ``K``/``R``/``U`` for keep/reject/unsure, arrow keys to navigate, and ``X``
+to clear a verdict. Every change is written immediately to
+``data/topdown_review/round_1_labels.{json,csv}``; the task JSONLs themselves are
+not modified. The intended workflow has three rounds: review originals, regenerate
+only rejects and review Round 2, then regenerate the remaining rejects and review
+Round 3. Later rounds consume a generated ``round_N_manifest.json`` so image hashes
+and parent lineage remain explicit.
+
+After Round 1 is complete, generate the Round 2 candidates and launch their reviewer:
+
+```bash
+python -m view_suite.envs.habitat_gs_proxy_task.data_gen.regenerate_top_down --round 2
+# Replaces only the Habitat-GS entries with native Gaussian-splat renders.
+python -m \
+  view_suite.envs.habitat_gs_proxy_task.data_gen.rerender_habitat_gs_top_down
+python -m view_suite.envs.habitat_gs_proxy_task.data_gen.review_top_down --round 2
+```
+
+The regeneration is corpus-specific: AI2-THOR hides the ceiling before using its map
+camera, ViewSuite clips ScanNet geometry above eye level, and Habitat-GS removes the
+ceiling/floaters, bakes colour from the nearest real task camera, then uses the native
+Gaussian covariance/opacity rasterizer. The second command changes only Habitat-GS
+manifest entries; AI2-THOR and ViewSuite candidates remain byte-for-byte unchanged.
+Candidates live under ``data/topdown_review/round_2_candidates*``; the original corpus
+images remain intact.
+
+After every candidate has a final ``keep`` or ``reject`` verdict, promote only the
+accepted images into disposable release trees. The command is a dry run unless
+``--apply`` is present; it verifies candidate and parent hashes, updates every matching
+JSONL and sample sidecar, and writes ``top_down_promotion.json`` for auditing.
+
+```bash
+python -m view_suite.envs.habitat_gs_proxy_task.data_gen.promote_top_down \
+  --labels data/topdown_review/round_2_labels.json \
+  --manifest data/topdown_review/round_2_manifest.json \
+  --dataset ai2thor=$RELEASE_ROOT/ai2thor \
+  --dataset habitat_gs=$RELEASE_ROOT/habitat_gs \
+  --dataset viewsuite=$RELEASE_ROOT/viewsuite15k-habitat \
+  --metadata-only viewsuite=$RELEASE_ROOT/viewsuite15k-habitat-p2v-intermediate \
+  --metadata-only viewsuite=$RELEASE_ROOT/viewsuite15k-habitat-v2p-intermediate
+# Inspect the report, then repeat with --apply.
+```
+
+Use ``--allow-diverged-images viewsuite`` only after independently confirming the
+current ViewSuite images are the intended parents. When materializing standalone
+intermediate datasets, their own promotion report is stored as
+``top_down_promotion.json`` and the provenance for copied base images is stored
+separately as ``top_down_base_promotion.json``.
+
+To inspect the alternative Habitat-Sim render of the ViewSuite/ScanNet scenes without
+mixing it into Round 2, build a separate left/right inventory and launch another
+reviewer:
+
+```bash
+python -m view_suite.envs.scannet_proxy_task.data_gen.prepare_habitat_top_down_comparison
+python -m view_suite.envs.habitat_gs_proxy_task.data_gen.review_top_down \
+  --round 2 \
+  --manifest data/topdown_review/viewsuite_habitat_comparison_manifest.json \
+  --output data/topdown_review/viewsuite_habitat_comparison_labels.json
+```
+
+The left panel is the current ViewSuite image and the right panel is Habitat-Sim's
+render of the same scene.
+
 ## Render service (IVP only)
 
 Habitat-GS is a *backend* of the existing render service, not a second service — same
