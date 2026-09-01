@@ -24,68 +24,22 @@ iterations: 3
 general_overrides:
   rl:
     training_steps: 600
-    vagen_dir: VAGEN
-    # train_files / val_files are injected by run.sh (need absolute paths)
-    hydra_overrides:
-      data:
-        max_prompt_length: 4000
-        max_response_length: 10000
-        train_batch_size: 128
-        train_files: null
-        val_files: null
-        eval_files: null
-      algorithm:
-        adv_estimator: gae
-        kl_ctrl:
-          kl_coef: 0.0
-      actor_rollout_ref:
-        model:
-          use_remove_padding: true
-          use_fused_kernels: true
-        actor:
-          ppo_micro_batch_size_per_gpu: 2
-          ppo_mini_batch_size: 128
-          checkpoint:
-            save_contents: [model, hf_model, optimizer, extra]
-          fsdp_config:
-            param_offload: true
-            optimizer_offload: true
-        rollout:
-          log_prob_micro_batch_size_per_gpu: 2
-          tensor_model_parallel_size: 1
-          mode: async
-          max_num_batched_tokens: 32768
-          gpu_memory_utilization: 0.6
-          enforce_eager: true
-          disable_log_stats: false
-          agent:
-            agent_loop_config_path: vagen/configs/agent.yaml
-          engine_kwargs:
-            sglang:
-              attention_backend: flashinfer
-              mm_attention_backend: triton_attn
-          n: 1
-        ref:
-          log_prob_micro_batch_size_per_gpu: 2
-          fsdp_config:
-            param_offload: true
-      critic:
-        enable: true
-        model:
-          use_remove_padding: true
-          fsdp_config:
-            param_offload: true
-            optimizer_offload: true
-        ppo_micro_batch_size_per_gpu: 2
-      trainer:
-        n_gpus_per_node: 8
-        save_freq: 20
-        test_freq: 20
-        max_actor_ckpt_to_keep: 1
-        max_critic_ckpt_to_keep: 1
-        nnodes: 1
-        skip_special_tokens_val: true
-        log_val_generations: 32
+    slime:
+      train_envs: null
+      eval_envs: null
+      harness: concat
+      algorithm: default_gae
+      rollout_max_prompt_len: 4000
+      rollout_max_response_len: 10000
+      rollout_batch_size: 128
+      n_samples_per_prompt: 1
+      num_gpus: 8
+      rollout_tensor_parallel_size: 1
+      sglang_mem_fraction_static: 0.6
+      sglang_attention_backend: flashinfer
+      sglang_mm_attention_backend: triton_attn
+      eval_interval: 20
+      save_interval: 20
 
   traj_to_sft:
     module: graphrl.envs.viewsuite.viewsuite_interactive_view_planning.InteractiveViewPlanningTrajToSFT
@@ -220,19 +174,3 @@ iteration_overrides:
     rl:
       training_steps: 1001
       timeout: 259200
-      hydra_overrides:
-        huggingface_hub:
-          hf_save_freq: 200
-          repo_id: null
-          private: false
-
-# RL runs while it improves; SFT runs when it stops. Past best_metric_threshold
-# the schedule latches: no more SFT, run_patience ends the run instead.
-rl_schedule:
-  enabled: true
-  metric: val-aux/ae/traj_success/mean@1
-  min_delta: 0.03
-  iter_patience: 3         # validations without improvement -> SFT
-  run_patience: 8          # validations without improvement, latched -> end run
-  best_metric_threshold: 0.1
-  total_accumulated_rl_step: 801

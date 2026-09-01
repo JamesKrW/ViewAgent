@@ -16,11 +16,18 @@ run:
 
 backends:
   azure:
-    azure_endpoint: "https://linjl-ma65uv6u-eastus2.cognitiveservices.azure.com/"
+    azure_endpoint: ${oc.env:AZURE_OPENAI_ENDPOINT}
     azure_api_key: ""         # or export AZURE_API_KEY
     azure_api_version: "2024-12-01-preview"
     deployment: "gpt-5.1"
     model: ${backends.azure.deployment}
+    max_concurrency: 4
+    max_retries: 6
+    min_backoff: 0.5
+    max_backoff: 8.0
+  openai:
+    model: "gpt-5.1"
+    api_key: ""             # or export OPENAI_API_KEY
     max_concurrency: 4
     max_retries: 6
     min_backoff: 0.5

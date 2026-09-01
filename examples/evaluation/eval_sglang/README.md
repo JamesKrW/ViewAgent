@@ -81,7 +81,7 @@ env "${COMMON[@]}" \
 - Multi-GPU server: set `TP_SIZE=N` (single replica spanning N GPUs) or
   `DP_SIZE=N` (N independent replicas).
 - Override any YAML key on the command line — anything after the script name
-  is forwarded to `vagen.evaluate.run_eval`:
+  is forwarded to `view_suite.evaluation.run_eval`:
 
   ```bash
   ... bash examples/evaluation/eval_sglang/eval_model.sh \

@@ -64,7 +64,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image
-from vagen.envs.gym_image_env import GymImageEnv
+from view_suite.gym.gym_image_env import GymImageEnv
 
 from .augment import run_vagen_eval_and_collect
 from .base import BaseChecker, BaseDataset, Datapoint, TurnCheck

@@ -6,7 +6,7 @@
 # Requires the Habitat-GS HTTP render service running and its URL in
 # client_url_habitat_gs.txt (see scripts/habitat_gs_http_service.sh).
 #
-#   VIEWSUITE_ROOT=$(pwd) python -m vagen.evaluate.run_eval \
+#   VIEWSUITE_ROOT=$(pwd) python -m view_suite.evaluation.run_eval \
 #     --config examples/evaluation/eval_random_habitat_gs.yaml fileroot=$(pwd)
 # ─────────────────────────────────────────────────────────────────────
 

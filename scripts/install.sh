@@ -6,9 +6,8 @@
 #   bash scripts/install.sh
 #
 # Environment knobs:
-#   SKIP_VERL_BOOTSTRAP=1   skip verl's install_vllm_sglang_mcore.sh
-#   USE_MEGATRON=0          (default) skip megatron build
-#   USE_SGLANG=1            (default) install sglang
+#   SKIP_SLIME_BOOTSTRAP=1  skip the VAGEN-SLIME CUDA/runtime build
+#   SLIME_ENV_PREFIX=/path  install into this conda environment
 
 set -euo pipefail
 
@@ -17,42 +16,45 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 export VIEWSUITE_ROOT="${VIEWSUITE_ROOT:-${REPO_ROOT}}"
 
 GRAPHRL_DIR="${REPO_ROOT}/GraphRL"
-VAGEN_DIR="${GRAPHRL_DIR}/VAGEN"
-VERL_DIR="${VAGEN_DIR}/verl"
+VAGEN_SLIME_DIR="${GRAPHRL_DIR}/VAGEN-SLIME"
 LF_DIR="${GRAPHRL_DIR}/LLaMA-Factory"
+SLIME_ENV_PREFIX="${SLIME_ENV_PREFIX:-${CONDA_PREFIX:-${REPO_ROOT}/../conda_envs/slime}}"
 
 cat > "${REPO_ROOT}/.env" <<EOF
 export VIEWSUITE_ROOT="${VIEWSUITE_ROOT}"
 EOF
 
-if [ "${SKIP_VERL_BOOTSTRAP:-0}" != "1" ]; then
-    (cd "${VERL_DIR}" && USE_MEGATRON="${USE_MEGATRON:-0}" USE_SGLANG="${USE_SGLANG:-1}" \
-        bash scripts/install_vllm_sglang_mcore.sh)
+if [ "${SKIP_SLIME_BOOTSTRAP:-${SKIP_VERL_BOOTSTRAP:-0}}" != "1" ]; then
+    ENV_PREFIX="${SLIME_ENV_PREFIX}" \
+        bash "${VAGEN_SLIME_DIR}/scripts/build_slime_env.sh"
 fi
 
-pip install --no-deps -e "${VERL_DIR}"
-pip install "trl==0.26.2"
-pip install "huggingface-hub>=0.34.0,<1.0"
+SLIME_PYTHON="${SLIME_PYTHON:-${SLIME_ENV_PREFIX}/bin/python}"
+if [ ! -x "${SLIME_PYTHON}" ]; then
+    echo "SLIME Python not found at ${SLIME_PYTHON}" >&2
+    echo "Run without SKIP_SLIME_BOOTSTRAP, activate the target conda env, or set SLIME_PYTHON." >&2
+    exit 1
+fi
 
-pip install -e "${VAGEN_DIR}"
+"${SLIME_PYTHON}" -m pip install --no-deps -e "${VAGEN_SLIME_DIR}/slime"
 
-pip install -e "${LF_DIR}"
-pip install -r "${LF_DIR}/requirements/metrics.txt"
-pip install -r "${LF_DIR}/requirements/deepspeed.txt"
+"${SLIME_PYTHON}" -m pip install -e "${LF_DIR}"
+"${SLIME_PYTHON}" -m pip install -r "${LF_DIR}/requirements/metrics.txt"
+"${SLIME_PYTHON}" -m pip install -r "${LF_DIR}/requirements/deepspeed.txt"
 
-pip install -e "${GRAPHRL_DIR}"
-pip install -e "${REPO_ROOT}"
+"${SLIME_PYTHON}" -m pip install -e "${GRAPHRL_DIR}"
+"${SLIME_PYTHON}" -m pip install -e "${REPO_ROOT}"
 
-pip install transformers==4.57.1
-pip install "sglang[all]==0.5.3.post3"
+"${SLIME_PYTHON}" -m pip install transformers==4.57.1
 
 echo ""
 echo "============================================================"
 echo "Done. Quick sanity check:"
 echo "============================================================"
-python - <<'PY'
+PYTHONPATH="${REPO_ROOT}:${GRAPHRL_DIR}:${VAGEN_SLIME_DIR}:${VAGEN_SLIME_DIR}/slime${PYTHONPATH:+:${PYTHONPATH}}" \
+    "${SLIME_PYTHON}" - <<'PY'
 import importlib, sys
-mods = ["view_suite", "graphrl", "vagen", "verl", "llamafactory", "transformers", "sglang"]
+mods = ["view_suite", "graphrl", "vagen_agent", "slime", "llamafactory", "transformers", "sglang"]
 for m in mods:
     try:
         mod = importlib.import_module(m)

@@ -1,5 +1,5 @@
 defaults:
-  - eval_default
+  - ../eval_all_openrouter/eval_default
 
 default_chat_config:
   temperature: 0.0

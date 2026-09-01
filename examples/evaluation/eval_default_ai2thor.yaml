@@ -9,7 +9,7 @@
 #   # then split scene-disjoint into _train/_eval/_test via
 #   # view_suite.envs.utils.split_jsonl_by_scene.split_jsonl_by_scene
 #
-# Env classes (registered in VAGEN/vagen/configs/env_registry.yaml):
+# Env classes (registered by view_suite.envs.slime_adapter):
 #   - Ai2ThorPath2View                single-turn MCQ  (P2V / forward dynamics)
 #   - Ai2ThorView2Path                single-turn MCQ  (V2P / inverse dynamics)
 #   - Ai2ThorInteractiveViewPlanning  multi-turn tool-use (IVP / active exploration)

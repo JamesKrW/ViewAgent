@@ -9,9 +9,9 @@ default_chat_config:
 
 envs:
   - name: InteractiveViewPlanning
-    n_envs: 545
+    n_envs: 530
     tag_id: 21
-    seed: [0,545,1]
+    seed: [0,530,1]
     split: test
     max_turns: 20
     config:
@@ -22,9 +22,9 @@ envs:
       image_size: [512,512]
 
   - name: InteractiveViewPlanning
-    n_envs: 545
+    n_envs: 530
     tag_id: 22
-    seed: [0,545,1]
+    seed: [0,530,1]
     split: test
     max_turns: 30
     config:

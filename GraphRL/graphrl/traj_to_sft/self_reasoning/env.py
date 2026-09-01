@@ -18,7 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from vagen.envs.gym_image_env import GymImageEnv
+from view_suite.gym.gym_image_env import GymImageEnv
 
 from .base import BaseChecker, BaseDataset, Datapoint, import_by_path
 

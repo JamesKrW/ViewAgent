@@ -8,7 +8,6 @@ experiment_name: habitat_gs_ivp_relative_earlystop
 # The adaptive controller has no fixed iteration count or per-round step cap.
 iterations: null
 iteration_overrides: null
-rl_schedule: null
 
 general_overrides:
   rl:

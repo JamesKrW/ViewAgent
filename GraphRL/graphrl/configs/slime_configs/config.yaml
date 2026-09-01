@@ -1,0 +1,34 @@
+# GraphRL-owned defaults for the VAGEN-SLIME RL phase.
+slime_dir: VAGEN
+timeout: 259200
+poll_interval: 30
+training_steps: 5
+
+# New jobs should configure backend-native values here.  Existing pipeline
+# files may retain hydra_overrides while they are migrated; config.py translates
+# the supported legacy values once, before the SLIME process starts.
+slime:
+  # Matches the historical VAGEN trainer's concat_multi_turn=true default.
+  # Individual experiments can opt into no_concat or compact explicitly.
+  harness: concat
+  model_adapter: qwen
+  actor_gpus: null
+  rollout_gpus: null
+  num_steps_per_rollout: 1
+  rollout_temperature: 0.7
+  rollout_top_p: 0.9
+  eval_temperature: 0.0
+  eval_top_p: 1.0
+  # Environment-seed expansion matches VAGEN's AgenticDataset default.
+  data_seed: 0
+  seed: 42
+  max_tokens_per_gpu: null
+  sglang_attention_backend: triton
+  sglang_mm_attention_backend: sdpa
+  megatron_attention_backend: flash
+  record_rollout_images: true
+  train_script: graphrl/slime/train.py
+
+# Temporary source-compatibility input. It is translated, never passed to
+# Hydra/verl, and can be removed from each example independently.
+hydra_overrides: {}

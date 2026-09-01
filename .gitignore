@@ -29,6 +29,7 @@ share/python-wheels/
 MANIFEST
 
 /data/
+/data
 /model/
 *.log
 *.pid
