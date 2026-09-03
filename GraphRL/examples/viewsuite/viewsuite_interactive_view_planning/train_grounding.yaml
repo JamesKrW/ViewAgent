@@ -12,7 +12,7 @@ envs:
     max_turns: 10
     response_length_per_turn: 1024
     config:
-      jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/viewsuite_15k/interactive_view_planning_train_filter.jsonl
+      jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/viewsuite_15k/interactive_view_planning_train.jsonl
       image_size: [256, 256]
       format: grounding
       use_example_in_sys_prompt: false

@@ -1,48 +1,43 @@
-# =============================================================================
-# Deprecated pre-SLIME reference configuration
-# =============================================================================
+# GraphRL-owned defaults for the VAGEN/verl RL phase.
 #
-# No shipped launcher loads this file. It remains only so downstream branches
-# can translate historical overrides to ``graphrl/configs/slime_configs``.
-# Current GraphRL code loads ``slime_configs/config.yaml`` instead.
+# Two layers live here, and they are not the same thing:
+#   1. GraphRL-internal settings (vagen_dir, timeout, poll_interval, ...) read by
+#      graphrl/vagen/vagen_wrapper.py
+#   2. hydra_overrides, flattened into Hydra CLI args and passed to VAGEN. These
+#      win over VAGEN's own vagen_multiturn.yaml, which is the primary config.
 #
-# The historical format contained:
-# It contains:
-#   1. GraphRL-internal settings (timeout, poll_interval, etc.)
-#   2. hydra_overrides: dict of Hydra CLI args passed to VAGEN
-#
-# The old Hydra config is retained beside it as migration reference only.
+# Anything that makes a VAGEN run work at all is NOT here: it lives in the
+# submodule's vagen/configs/baseline_vllm.flags, which the command builder reads
+# directly so the two cannot drift. Nor is anything that merely restates a VAGEN
+# default -- restating one turns a backend upgrade into a silent no-op.
 
-# --- GraphRL-internal settings ---
-
-# Path to the VAGEN project root (relative to CWD or absolute)
-vagen_dir: VAGEN
-
-# Hydra config name (matches the YAML file in this directory, without .yaml)
-hydra_config_name: vagen_multiturn
+# Path to the VAGEN checkout. Relative values resolve against the repo root, not
+# the process CWD.
+vagen_dir: GraphRL/VAGEN
 
 # Module lifecycle
-timeout: 86400        # Max training time in seconds (default: 24h)
+timeout: 259200       # Max training time in seconds (72h)
 poll_interval: 30     # Polling interval for is_done() check
 
-# Graph builder for trajectory conversion during RL training
-graph_builder: null
-merge_interval: 300   # Seconds between traj-to-graph merge runs
-
-# Checkpoint detection
-training_steps: 5     # Expected total training steps for checkpoint monitor
+# Checkpoint detection: the monitor promotes the verl checkpoint at or past this
+# step into rl_model/. Pipelines override it per iteration.
+training_steps: 5
 
 # --- Hydra overrides ---
-# These are flattened into Hydra CLI args and passed to VAGEN.
-# They have the highest priority (override both base config and searchpath).
-#
-# Example:
-#   hydra_overrides:
-#     data:
-#       train_files: path/to/train.yaml
-#     actor_rollout_ref:
-#       model:
-#         path: Qwen/Qwen2.5-VL-7B-Instruct
-#     trainer:
-#       total_epochs: 3
-hydra_overrides: {}
+# Flattened into Hydra CLI args and passed to VAGEN. Highest priority.
+hydra_overrides:
+  trainer:
+    # The pipeline validates between iterations and reads the curve to decide
+    # whether to keep doing RL, so a run that never validated before training
+    # has no baseline to compare its first result against.
+    val_before_train: true
+    # GraphRL's TrajToSFT phase parses rollout text, so specials must survive.
+    # VAGEN's default drops them in validation.
+    skip_special_tokens_val: false
+    skip_special_tokens_train: false
+  huggingface_hub:
+    # The pipeline promotes checkpoints itself (graphrl/utils/checkpoint_monitor.py)
+    # and pushes at the iteration boundary, so the trainer's own uploader stays
+    # off unless an experiment turns it on.
+    hf_save_freq: null
+    repo_id: graphrl-vagen-training

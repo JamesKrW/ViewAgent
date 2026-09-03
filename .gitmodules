@@ -1,8 +1,8 @@
-[submodule "GraphRL/VAGEN-SLIME"]
-	path = GraphRL/VAGEN-SLIME
-	url = https://github.com/JamesKrW/VAGEN-SLIME.git
-	branch = viewagent-submodule
 [submodule "GraphRL/LLaMA-Factory"]
 	path = GraphRL/LLaMA-Factory
 	url = https://github.com/JamesKrW/LLaMA-Factory.git
 	branch = graphrl
+[submodule "GraphRL/VAGEN"]
+	path = GraphRL/VAGEN
+	url = https://github.com/JamesKrW/VAGEN.git
+	branch = main

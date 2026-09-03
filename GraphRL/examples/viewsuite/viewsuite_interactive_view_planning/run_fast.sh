@@ -26,7 +26,7 @@
 # =============================================================================
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../../_slime_env.sh"
+source "${SCRIPT_DIR}/../../_vagen_env.sh"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-cheap3b}"
 EXPERIMENT_DIR="${EXPERIMENT_DIR:-${PWD}/exps/viewsuite/${EXPERIMENT_NAME}}"
 N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-8}"
@@ -41,18 +41,18 @@ echo "[fast] model=Qwen2.5-VL-${MODEL_SIZE:-7B} steps/iter=${STEPS_PER_ITER:-61}
 echo "Logging to: ${LOG_FILE}"
 [ -z "${WANDB_API_KEY:-}" ] && export WANDB_MODE=offline
 
-"${SLIME_PYTHON}" -m graphrl.main \
+"${VAGEN_PYTHON}" -m graphrl.main \
     --config-path="${SCRIPT_DIR}" \
     --config-name=pipeline \
     project_name=viewsuite_graph_improve \
     experiment_name="${EXPERIMENT_NAME}" \
     "initial_model_path=Qwen/Qwen2.5-VL-${MODEL_SIZE:-7B}-Instruct" \
-    general_overrides.rl.slime.train_envs="${SCRIPT_DIR}/${TRAIN_CFG:-train_grounding.yaml}" \
-    general_overrides.rl.slime.eval_envs="${SCRIPT_DIR}/val.yaml" \
+    general_overrides.rl.hydra_overrides.data.train_files="${SCRIPT_DIR}/${TRAIN_CFG:-train_grounding.yaml}" \
+    general_overrides.rl.hydra_overrides.data.val_files="${SCRIPT_DIR}/val.yaml" \
     iterations=3 \
-    general_overrides.rl.slime.num_gpus="${N_GPUS_PER_NODE}" \
-    general_overrides.rl.slime.save_interval=10 \
-    general_overrides.rl.slime.eval_interval=10 \
+    general_overrides.rl.hydra_overrides.trainer.n_gpus_per_node="${N_GPUS_PER_NODE}" \
+    general_overrides.rl.hydra_overrides.trainer.save_freq=10 \
+    general_overrides.rl.hydra_overrides.trainer.test_freq=10 \
     general_overrides.sft.n_gpus="${SFT_N_GPUS}" \
     'general_overrides.traj_to_sft.generators=[multi_turn_action_gen,view_difference,view_difference_mcq]' \
     "iteration_overrides.iter0.rl.training_steps=${STEPS_PER_ITER:-61}" \

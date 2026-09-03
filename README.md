@@ -96,7 +96,7 @@ git submodule update --init --recursive
 conda create -n viewsuite python=3.12 -y
 conda activate viewsuite
 
-# Install ViewSuite + GraphRL + VAGEN-SLIME + LLaMA-Factory
+# Install ViewSuite + GraphRL + VAGEN + LLaMA-Factory
 bash scripts/install.sh
 ```
 
@@ -349,7 +349,7 @@ If you find ViewSuite useful in your research, please consider citing our paper:
 
 ## 🙏 Acknowledgements
 
-ViewSuite is built on [ScanNet](http://www.scan-net.org/) for real 3D indoor scenes, and our training and evaluation framework draws on [VAGEN-SLIME](https://github.com/JamesKrW/VAGEN-SLIME), [slime](https://github.com/THUDM/slime), [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory), and [sglang](https://github.com/sgl-project/sglang). The higher-fidelity Gaussian-Splatting renders use pretrained per-scene ScanNet 3DGS reconstructions from [SceneSplat-7K](https://huggingface.co/datasets/GaussianWorld/scene_splat_7k) ([SceneSplat](https://arxiv.org/abs/2503.18052), ICCV 2025). We thank the authors of these projects for open-sourcing their work.
+ViewSuite is built on [ScanNet](http://www.scan-net.org/) for real 3D indoor scenes, and our training and evaluation framework draws on [VAGEN](https://github.com/JamesKrW/VAGEN), [verl](https://github.com/volcengine/verl), [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory), and [vLLM](https://github.com/vllm-project/vllm). The higher-fidelity Gaussian-Splatting renders use pretrained per-scene ScanNet 3DGS reconstructions from [SceneSplat-7K](https://huggingface.co/datasets/GaussianWorld/scene_splat_7k) ([SceneSplat](https://arxiv.org/abs/2503.18052), ICCV 2025). We thank the authors of these projects for open-sourcing their work.
 
 ## 📄 License
 

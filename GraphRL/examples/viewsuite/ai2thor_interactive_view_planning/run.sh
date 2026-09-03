@@ -15,7 +15,7 @@
 # =============================================================================
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../../_slime_env.sh"
+source "${SCRIPT_DIR}/../../_vagen_env.sh"
 EXPERIMENT_DIR="${PWD}/exps/viewsuite/ai2thor_interactive_view_planning"
 N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-8}"
 SFT_N_GPUS="${SFT_N_GPUS:-${N_GPUS_PER_NODE}}"
@@ -27,17 +27,17 @@ echo "Using ${N_GPUS_PER_NODE} GPU(s) for RL and ${SFT_N_GPUS} GPU(s) for SFT"
 
 export WANDB_MODE="${WANDB_MODE:-online}"   # wandb authed via ~/.netrc; set WANDB_MODE=offline to disable
 
-"${SLIME_PYTHON}" -m graphrl.main \
+"${VAGEN_PYTHON}" -m graphrl.main \
     --config-path="${SCRIPT_DIR}" \
     --config-name=pipeline \
-    general_overrides.rl.slime.train_envs="${SCRIPT_DIR}/train.yaml" \
-    general_overrides.rl.slime.eval_envs="${SCRIPT_DIR}/val.yaml" \
+    general_overrides.rl.hydra_overrides.data.train_files="${SCRIPT_DIR}/train.yaml" \
+    general_overrides.rl.hydra_overrides.data.val_files="${SCRIPT_DIR}/val.yaml" \
     iterations=4 \
-    general_overrides.rl.slime.num_gpus="${N_GPUS_PER_NODE}" \
+    general_overrides.rl.hydra_overrides.trainer.n_gpus_per_node="${N_GPUS_PER_NODE}" \
     general_overrides.sft.n_gpus="${SFT_N_GPUS}" \
     'general_overrides.traj_to_sft.generators=[multi_turn_action_gen,view_difference,view_difference_mcq]' \
     iteration_overrides.iter0.rl.training_steps=65 \
     iteration_overrides.iter1.rl.training_steps=65 \
     iteration_overrides.iter2.rl.training_steps=65 \
-    +iteration_overrides.iter3.rl.slime.record_rollout_images=false \
+    +iteration_overrides.iter3.rl.hydra_overrides.trainer.log_image.enable=false \
     "$@" 2>&1 | tee "${LOG_FILE}"

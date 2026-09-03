@@ -18,7 +18,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../../_slime_env.sh"
+source "${SCRIPT_DIR}/../../_vagen_env.sh"
 EXPERIMENT_NAME="viewsuite_interactive_view_planning_baseline_rl"
 EXPERIMENT_DIR="${PWD}/exps/viewsuite/${EXPERIMENT_NAME}"
 
@@ -30,14 +30,14 @@ if [ -z "${WANDB_API_KEY:-}" ]; then
     export WANDB_MODE=offline
 fi
 
-"${SLIME_PYTHON}" -m graphrl.main \
+"${VAGEN_PYTHON}" -m graphrl.main \
     --config-path="${SCRIPT_DIR}" \
     --config-name=pipeline \
     experiment_name="${EXPERIMENT_NAME}" \
-    general_overrides.rl.slime.train_envs="${SCRIPT_DIR}/train_turn_format.yaml" \
-    general_overrides.rl.slime.eval_envs="${SCRIPT_DIR}/val.yaml" \
+    general_overrides.rl.hydra_overrides.data.train_files="${SCRIPT_DIR}/train_turn_format.yaml" \
+    general_overrides.rl.hydra_overrides.data.val_files="${SCRIPT_DIR}/val.yaml" \
     iterations=1 \
-    general_overrides.rl.slime.num_gpus=8 \
+    general_overrides.rl.hydra_overrides.trainer.n_gpus_per_node=8 \
     general_overrides.sft.n_gpus=8 \
     'general_overrides.traj_to_sft.generators=[action_gen,path_to_view,multi_turn_action_gen]' \
     iteration_overrides.iter0.rl.training_steps=1000 \

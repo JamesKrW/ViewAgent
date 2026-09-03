@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Short RL-ONLY smoke run for Habitat-GS Interactive View Planning.
-# Proves the GraphRL RL loop (SLIME+SGLang against the Habitat-GS render
+# Proves the GraphRL RL loop (VAGEN/verl+vLLM against the Habitat-GS render
 # service) works end-to-end on Qwen2.5-VL. Skips traj_to_sft + SFT.
 #
 # Prereqs (same as run.sh): VIEWSUITE_ROOT exported, render service up with
@@ -15,7 +15,7 @@
 # =============================================================================
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../../_slime_env.sh"
+source "${SCRIPT_DIR}/../../_vagen_env.sh"
 
 EXPERIMENT_DIR="${PWD}/exps/viewsuite/habitat_gs_ivp_smoke"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,2,3,4}"
@@ -27,15 +27,15 @@ echo "Logging to: ${LOG_FILE}  (GPUs=${CUDA_VISIBLE_DEVICES})"
 
 export WANDB_MODE="${WANDB_MODE:-online}"   # wandb authed via ~/.netrc; set WANDB_MODE=offline to disable
 
-"${SLIME_PYTHON}" -m graphrl.main \
+"${VAGEN_PYTHON}" -m graphrl.main \
     --config-path="${SCRIPT_DIR}" \
     --config-name=pipeline \
     experiment_name=habitat_gs_ivp_smoke \
-    general_overrides.rl.slime.train_envs="${SCRIPT_DIR}/train.yaml" \
-    general_overrides.rl.slime.eval_envs="${SCRIPT_DIR}/val_smoke.yaml" \
+    general_overrides.rl.hydra_overrides.data.train_files="${SCRIPT_DIR}/train.yaml" \
+    general_overrides.rl.hydra_overrides.data.val_files="${SCRIPT_DIR}/val_smoke.yaml" \
     iterations=1 \
-    general_overrides.rl.slime.num_gpus="${N_GPUS_PER_NODE}" \
-    general_overrides.rl.slime.rollout_batch_size=8 \
+    general_overrides.rl.hydra_overrides.trainer.n_gpus_per_node="${N_GPUS_PER_NODE}" \
+    general_overrides.rl.hydra_overrides.data.train_batch_size=8 \
     iteration_overrides.iter0.rl.training_steps=2 \
     +iteration_overrides.iter0.traj_to_sft=null \
     iteration_overrides.iter0.sft=null \

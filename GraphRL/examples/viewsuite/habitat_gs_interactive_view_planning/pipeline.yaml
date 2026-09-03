@@ -24,35 +24,63 @@ iterations: 3
 general_overrides:
   rl:
     training_steps: 600
-    slime:
-      train_envs: null
-      eval_envs: null
-      harness: concat
-      algorithm: default_gae
-      rollout_max_prompt_len: 4000
-      # Keep every concat trajectory within the dynamic microbatch budget.
-      # Oversized single samples cannot be split and can OOM H100-80GB.
-      rollout_max_context_len: 4096
-      rollout_max_response_len: 10000
-      rollout_batch_size: 128
-      n_samples_per_prompt: 1
-      num_gpus: 8
-      colocate: false
-      megatron_model_type: qwen2.5-7B
-      # TP=4, not 2. With colocate the memory saver has to re-back the whole
-      # training reserved pool on every wake_up; at TP=2 that pool ratchets up
-      # each cycle (29 -> 45 GB measured) until cu_mem_create fails on an 80 GB
-      # host. TP=4 halves the per-rank share and the pool plateaus at 34.6 GB,
-      # peaking 74.5 GB of 79.4 GB. Costs ~10% wall clock; verified locally
-      # against a ballasted 79.43 GB envelope.
-      tensor_parallel_size: 4
-      max_tokens_per_gpu: 4096
-      rollout_tensor_parallel_size: 1
-      sglang_mem_fraction_static: 0.6
-      sglang_attention_backend: flashinfer
-      sglang_mm_attention_backend: triton_attn
-      eval_interval: 20
-      save_interval: 20
+    # VAGEN/verl backend. Only what this experiment varies is set here: the flags
+    # that make a run work at all live in VAGEN's own
+    # vagen/configs/baseline_vllm.flags, which the command builder reads directly
+    # so the two cannot drift, and GraphRL's own defaults live in
+    # graphrl/configs/vagen_configs/config.yaml. Restating either here would turn
+    # a backend upgrade into a silent no-op.
+    #
+    # Colocated by construction: verl's hybrid engine puts actor, critic and
+    # rollout on the same 8 GPUs (actor_rollout_ref.hybrid_engine is VAGEN's
+    # default), so there is no disjoint-placement knob to set.
+    #
+    # train_files / val_files are injected by run.sh (they need absolute paths).
+    hydra_overrides:
+      data:
+        max_prompt_length: 4000
+        max_response_length: 10000
+        train_batch_size: 128
+        train_files: null
+        val_files: null
+      algorithm:
+        # PPO with a critic, credited per token rather than per row. `gae` is
+        # wrong here for the same reason VAGEN overrides it to `default_gae`:
+        # verl's own estimators open each row with nextvalues=0, which is right
+        # when a row is an episode and wrong when concat makes a row one turn.
+        adv_estimator: token_level_gae
+      actor_rollout_ref:
+        actor:
+          ppo_mini_batch_size: 128
+          ppo_micro_batch_size_per_gpu: 2
+          checkpoint:
+            # CheckpointMonitor promotes <ckpt>/actor/huggingface into rl_model/,
+            # and that directory only exists when hf_model is among the contents.
+            save_contents: [model, hf_model, optimizer, extra]
+        rollout:
+          n: 1
+          tensor_model_parallel_size: 1
+          gpu_memory_utilization: 0.6
+          max_num_batched_tokens: 32768
+          enforce_eager: true
+          free_cache_engine: true
+          enable_chunked_prefill: true
+          log_prob_micro_batch_size_per_gpu: 2
+        ref:
+          log_prob_micro_batch_size_per_gpu: 2
+      critic:
+        # Deliberately not in baseline_vllm.flags: `need_critic` short-circuits on
+        # it, so setting it there would build and train a critic for the GRPO
+        # scripts too. A PPO experiment sets it itself.
+        enable: true
+        ppo_micro_batch_size_per_gpu: 2
+      trainer:
+        harness: concat
+        n_gpus_per_node: 8
+        nnodes: 1
+        save_freq: 20
+        test_freq: 20
+        log_val_generations: 32
 
   traj_to_sft:
     module: graphrl.envs.viewsuite.viewsuite_interactive_view_planning.InteractiveViewPlanningTrajToSFT

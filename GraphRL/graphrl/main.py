@@ -4,7 +4,7 @@ GraphRL pipeline entry point + center controller.
 Orchestrates the iterative pipeline ``RL → TrajToSFT → SFT`` per iteration.
 
 Mono-backend by design:
-  - RL  is always VAGEN-SLIME  (graphrl.slime.SlimeWrapper)
+  - RL  is always VAGEN/verl  (graphrl.vagen.VagenWrapper)
   - SFT is always LLaMA-Factory (graphrl.llama_factory.LFWrapper)
   - TrajToSFT is the only user-extension point — pipeline.yaml supplies a
     dotted path to a ``TrajToSFTModule`` subclass via ``traj_to_sft.module``.
@@ -45,7 +45,7 @@ from graphrl import (
     ModuleState,
     TrajToSFTModule,
     TrajToSFTPaths,
-    SlimeWrapper,
+    VagenWrapper,
     load_traj_to_sft_class,
 )
 from graphrl.utils.config import (
@@ -130,7 +130,7 @@ class MaterializePhase:
 
 # A "phase" is anything with launch / is_done / kill / get_output —
 # i.e. one of the three concrete module classes plus MaterializePhase.
-Phase = Union[SlimeWrapper, TrajToSFTModule, LFWrapper, MaterializePhase]
+Phase = Union[VagenWrapper, TrajToSFTModule, LFWrapper, MaterializePhase]
 
 
 # ── framework defaults (used when pipeline.yaml omits these keys) ─────────
@@ -291,7 +291,7 @@ class GraphRLController:
     # ── phase execution ──────────────────────────────────────────────────
 
     def _run_module(self, module: Phase) -> ModuleOutput:
-        needs_gpu = isinstance(module, (SlimeWrapper, LFWrapper))
+        needs_gpu = isinstance(module, (VagenWrapper, LFWrapper))
 
         if needs_gpu and self._active_module:
             logger.info(
@@ -355,7 +355,7 @@ class GraphRLController:
             iter_XXX/
                 rl/                  # RL working directory
                     rollout_data/    # compatibility JSONLs (TrajToSFT input)
-                    slime_checkpoints/
+                    verl_checkpoints/
                     rl_model/        # RL output, OR symlink → upstream model
                 traj_to_sft/
                     sft_data/        # LLaMA-Factory dataset
@@ -393,7 +393,7 @@ class GraphRLController:
             rl_cfg["_iter_num"] = iter_num
             rl_cfg["_project_name"] = project_name
             rl_cfg["_experiment_name"] = experiment_name
-            phases.append(SlimeWrapper(
+            phases.append(VagenWrapper(
                 config=rl_cfg,
                 input_paths={"model": current_model},
                 output_paths={

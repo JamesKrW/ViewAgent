@@ -17,7 +17,7 @@ from omegaconf import OmegaConf
 logger = logging.getLogger(__name__)
 
 # Paths (under ``graphrl/configs/``) of the two backend default config files.
-RL_DEFAULTS_PATH = "slime_configs/config"
+RL_DEFAULTS_PATH = "vagen_configs/config"
 SFT_DEFAULTS_PATH = "llamafactory_configs/config"
 
 # graphrl/configs/ — resolved once. This file lives at graphrl/utils/config.py,

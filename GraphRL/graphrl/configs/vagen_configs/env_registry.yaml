@@ -1,22 +1,43 @@
 # =============================================================================
-# Deprecated legacy environment registry (migration reference only)
+# ViewSuite environment registry
 # =============================================================================
 #
-# Runtime registration now happens in ``view_suite.envs.slime_adapter`` using
-# VAGEN-SLIME's public ``register_env`` API.
+# Read by ``graphrl/vagen/utils/command_builder.py`` and emitted as
+# ``+env_registry.<Name>=<dotted.path>`` Hydra overrides, which append to the
+# registry VAGEN's own ``vagen/configs/env_registry.yaml`` already defines.
 #
-# Add custom environments here. Existing VAGEN envs are listed as defaults.
+# Not pulled in through a Hydra ``defaults`` list, and not for want of trying:
+# doing that requires our file to be the primary config and VAGEN's
+# ``vagen_multiturn`` to be an include, but that file sets ``hydra.searchpath``
+# and Hydra permits it only in the primary config. The alternative -- copying
+# VAGEN's config here so ours can be primary -- is the arrangement this backend
+# already had once, and the copy silently froze at whatever the backend looked
+# like the day it was made. Appending from the command line keeps VAGEN's config
+# authoritative and this file the only place ViewSuite envs are named.
+#
+# Because these are appends, VAGEN's built-ins (Sokoban, FrozenLake, SpatialGym,
+# PrimitiveSkill, RemoteEnv) stay registered and must NOT be repeated here -- a
+# ``+`` override on an existing key is an error.
+#
+# The classes are ViewSuite's own environments, named directly rather than
+# through a wrapper: they already implement VAGEN's ``GymBaseEnv`` contract
+# (async ``reset(seed)`` / ``step(action_str)`` / ``system_prompt`` / ``close``,
+# with ``step`` returning the four-value ``(obs, reward, done, info)``), because
+# that is the contract they were written against. Only the SLIME backend needed
+# an adapter.
 
 env_registry:
-  Sokoban: graphrl.envs.sokoban.sokoban_env.Sokoban
-  FrozenLake: vagen.envs.frozenlake.frozenlake_env.FrozenLake
+  # --- ScanNet proxy tasks (P2V / V2P / IVP) ---
   Path2View: view_suite.envs.scannet_proxy_task.path_to_view.Path2View
-  InteractiveViewPlanning: view_suite.envs.scannet_proxy_task.interactive_view_planning.InteractiveViewPlanning
   View2Path: view_suite.envs.scannet_proxy_task.view_to_path.View2Path
-  # --- AI2-THOR proxy tasks (P2V / V2P / IVP) ---
+  InteractiveViewPlanning: view_suite.envs.scannet_proxy_task.interactive_view_planning.InteractiveViewPlanning
+
+  # --- AI2-THOR proxy tasks ---
   Ai2ThorPath2View: view_suite.envs.ai2thor_proxy_task.path_to_view.Ai2ThorPath2View
   Ai2ThorView2Path: view_suite.envs.ai2thor_proxy_task.view_to_path.Ai2ThorView2Path
   Ai2ThorInteractiveViewPlanning: view_suite.envs.ai2thor_proxy_task.interactive_view_planning.Ai2ThorInteractiveViewPlanning
+
+  # --- Habitat-GS proxy tasks ---
   HabitatGSPath2View: view_suite.envs.habitat_gs_proxy_task.path_to_view.HabitatGSPath2View
   HabitatGSView2Path: view_suite.envs.habitat_gs_proxy_task.view_to_path.HabitatGSView2Path
   HabitatGSInteractiveViewPlanning: view_suite.envs.habitat_gs_proxy_task.interactive_view_planning.HabitatGSInteractiveViewPlanning

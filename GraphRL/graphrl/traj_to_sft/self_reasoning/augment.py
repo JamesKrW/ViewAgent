@@ -48,11 +48,13 @@ def _ensure_registered(env_name: str, env_cls: type = None) -> None:
     fine but the LAST class registered under a name wins.
     """
     global _REGISTERED
-    from vagen_agent.envs import register_env
-    from view_suite.envs.slime_adapter import adapt_legacy_env
+    from vagen.envs import register_env
     if env_cls is None:
         env_cls = ReasoningEnv
-    register_env(env_name, adapt_legacy_env(env_name, env_cls))
+    # Registered as-is: ReasoningEnv and MCQReasoningEnv subclass GymImageEnv and
+    # already speak VAGEN's GymBaseEnv contract. The wrapper this used to go
+    # through existed only to reshape them for the SLIME backend.
+    register_env(env_name, env_cls)
     _REGISTERED = True
 
 
@@ -184,7 +186,21 @@ def run_vagen_eval_and_collect(
 
     _ensure_registered(env_name, env_cls=env_cls)
 
-    from vagen_agent.evaluation.runner import run_evaluation
+    # ★ Not ported to the VAGEN/verl backend. VAGEN's evaluation package exposes
+    # `run_eval_parallel(...)`, whose signature and result layout differ from the
+    # SLIME runner this was written against, so the call below is not a rename.
+    # Nothing in the shipped pipelines reaches here -- self-reasoning is an opt-in
+    # TrajToSFT surface and none of the three ViewSuite experiments enable it --
+    # so this raises where the gap is instead of failing as a bare ImportError
+    # several frames deeper.
+    try:
+        from vagen.evaluation.runner import run_evaluation
+    except ImportError as exc:
+        raise NotImplementedError(
+            "self-reasoning augmentation is not available on the VAGEN/verl backend: "
+            "vagen.evaluation.runner exposes run_eval_parallel, not run_evaluation. "
+            "Port run_vagen_eval_and_collect() to that API to re-enable it."
+        ) from exc
     from view_suite.evaluation.config import load_legacy_config
     from view_suite.evaluation.run_eval import _export_legacy_layout
 
