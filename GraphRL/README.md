@@ -265,7 +265,7 @@ Fixed along the way, and worth not re-breaking:
 cd /path/to/ViewAgent
 
 env PYTHONPATH="$PWD:$PWD/GraphRL:$PWD/GraphRL/VAGEN:$PWD/GraphRL/VAGEN/verl" \
-  ../conda_envs/slime/bin/python -m pytest \
+  ../conda_envs/verl/bin/python -m pytest \
   GraphRL/tests view_suite/habitat_gs/tests -q
 
 find GraphRL/examples examples/evaluation -name '*.sh' -print0 \
