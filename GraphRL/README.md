@@ -27,11 +27,11 @@ git submodule update --init --recursive   # also fetches VAGEN's verl
 ```
 
 `verl` is used as a checkout on `PYTHONPATH`, not as an installed package, and
-it must come first so it wins over any installed copy — the training env ships
-verl 0.6.1 as a package, which would otherwise shadow it. The example scripts
-source `examples/_vagen_env.sh`, which does this, selects the adjacent
-`../conda_envs/slime/bin/python` when available, and fails early with a readable
-message if the `verl` submodule was never initialised.
+it must come first so it wins over any installed copy. The example scripts
+source `examples/_vagen_env.sh`, which does this, selects
+`../conda_envs/verl/bin/python`, and fails early with a readable message if the
+`verl` submodule was never initialised. See **Environment** below for how that
+env is built and why it is not shared with `conda_envs/slime`.
 
 For ViewSuite runs, datasets and renderer URL files are resolved below
 `VIEWSUITE_ROOT`, which defaults to the ViewAgent checkout root:
