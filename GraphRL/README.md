@@ -191,6 +191,59 @@ existing directory and resume contract.
   it is not a rename. It raises `NotImplementedError` where the gap is. No
   shipped pipeline reaches it.
 
+## Known blocker: sglang weight sync for Qwen2.5-VL
+
+A run currently gets as far as the **first weight sync** and stops there:
+
+```
+sglang/srt/models/qwen2_5_vl.py: KeyError: 'model.visual.blocks.0.mlp.gate_up_proj.weight'
+  -> RuntimeError: Failed to complete async request to update_weights_from_tensor
+```
+
+verl sends the actor's weights under transformers-5.x HF names (`model.visual.*`).
+sglang's Qwen2.5-VL does know that spelling -- `hf_to_sglang_mapper` maps
+`model.visual.` to `visual.` -- but that mapper is only consulted in the
+**checkpoint loader** (`sglang/srt/model_loader/loader.py`, and only when a
+quant config is present). The runtime `update_weights_from_tensor` path in
+`model_runner.py` never applies it, so the name arrives unmapped and misses
+`params_dict`.
+
+This is a version incompatibility, not a configuration mistake, and it is where
+VAGEN's own warning lands: `setup.py` calls the vllm extra "the verified
+default" and `scripts/install.sh` says the sglang extra is not the tested path.
+The three candidate resolutions, in the order worth trying:
+
+1. **A newer sglang** (0.5.16-0.5.18 exist; VAGEN pins 0.5.15) — check whether
+   the runtime path gained the mapper. Note the pin is deliberate and the engine
+   extras also fix `flashinfer`, so this is not a drop-in bump.
+2. **Translate names verl-side** before the sync — small, but it is a patch
+   inside the submodule.
+3. **The vllm extra** (`torch 2.11.0 + vllm==0.22.0 + transformers[kernels] 5.12.1`),
+   which is the verified path. Ruled out here by project decision to standardise
+   on sglang; the two engines are not co-installable.
+
+The environment itself is correct and matches VAGEN's sglang extra: torch
+2.11.0+cu128, torchvision 0.26.0+cu128, flashinfer 0.6.12 (with a matching
+`flashinfer-cubin` — a mismatch there refuses to import), sglang 0.5.15.post1,
+transformers 5.12.1, trl 0.28.0, accelerate 1.14.0.
+
+Two of those floors are load-bearing and easy to regress:
+
+- **trl >= 0.27**. Below it, `import trl` pulls in vllm behind a bare
+  `if is_vllm_available()` and dies if vllm is merely present-but-unimportable.
+- **accelerate >= 1.12**. Earlier versions re-create parameters as
+  `param_cls(tensor, **param.__dict__)` inside `init_empty_weights`, which
+  forwards transformers' `_is_hf_initialized` into `Parameter.__new__` and fails
+  with `TypeError: Parameter.__new__() got an unexpected keyword argument`. verl
+  builds every non-rank-0 model under that context, so this looks like a verl or
+  critic bug and is neither.
+
+Also beware `pip install flashinfer-python`: it pulled a **cu130** torch 2.11
+over this env's cu128 one, after which torchvision and sglang both refuse to
+import. Pin the local version explicitly (`torch==2.11.0+cu128`) and take it
+from the cu128 index — plain `torch==2.11.0` is considered already satisfied by
+the cu130 wheel, so pip does nothing.
+
 ## Validation
 
 ```bash
