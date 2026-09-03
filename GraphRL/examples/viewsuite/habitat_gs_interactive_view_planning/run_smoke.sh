@@ -36,6 +36,7 @@ export WANDB_MODE="${WANDB_MODE:-online}"   # wandb authed via ~/.netrc; set WAN
     iterations=1 \
     general_overrides.rl.hydra_overrides.trainer.n_gpus_per_node="${N_GPUS_PER_NODE}" \
     general_overrides.rl.hydra_overrides.data.train_batch_size=8 \
+    general_overrides.rl.hydra_overrides.actor_rollout_ref.actor.ppo_mini_batch_size=8 \
     iteration_overrides.iter0.rl.training_steps=2 \
     +iteration_overrides.iter0.traj_to_sft=null \
     iteration_overrides.iter0.sft=null \

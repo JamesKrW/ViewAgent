@@ -31,6 +31,7 @@ Porting notes (VAGEN 260814 and later):
 import logging
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union
 
@@ -172,7 +173,12 @@ def build_vagen_command(
         config_dir = vagen_dir / "vagen" / "configs"
 
     cmd = [
-        "python3",
+        # sys.executable, not "python3": the controller runs under the training env,
+        # but "python3" resolves from PATH in the child, which is whatever conda env
+        # happens to be active -- typically `base`, where hydra is not installed. That
+        # surfaced as `ModuleNotFoundError: No module named 'hydra'` from a launcher
+        # that had just imported hydra successfully itself.
+        sys.executable or "python3",
         "-m",
         "vagen.training.main",
         f"--config-path={config_dir}",

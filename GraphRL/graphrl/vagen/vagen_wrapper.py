@@ -5,7 +5,7 @@ Mono-backend by design — the project commits to VAGEN for RL. ``VagenWrapper``
 is the only RL implementation; no registry, no abstract layer.
 
 Responsibilities:
-  - Spawn ``vagen.main_ppo`` as a subprocess (own process group)
+  - Spawn ``vagen.training.main`` as a subprocess (own process group)
   - Forward stdout to a per-iteration ``rl_training.log`` and stdout
   - Run a ``CheckpointMonitor`` daemon thread that promotes the final
     verl checkpoint into ``rl_model/``
@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
+import time
 import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -49,7 +50,7 @@ class VagenWrapper:
         ``model``     -- ``iter_XXX/rl_model/`` (populated by CheckpointMonitor)
 
     Notable config keys:
-        ``vagen_dir``             -- VAGEN repo root (must contain ``vagen/main_ppo``)
+        ``vagen_dir``             -- VAGEN checkout root (must contain ``vagen/training/main.py``)
         ``training_steps``        -- target step count (used by CheckpointMonitor)
         ``timeout``               -- watchdog seconds (consumed by controller)
         ``poll_interval``         -- is_done() polling cadence
@@ -75,6 +76,7 @@ class VagenWrapper:
         self._log_thread: Optional[threading.Thread] = None
         self._log_file_handle = None
         self._ckpt_monitor: Optional[CheckpointMonitor] = None
+        self._exit_seen_at: Optional[float] = None
 
     @property
     def state(self) -> ModuleState:
@@ -132,13 +134,45 @@ class VagenWrapper:
 
     def is_done(self) -> bool:
         model_path = Path(self.output_paths["model"])
-        if not _is_model_dir_complete(model_path):
+        if _is_model_dir_complete(model_path):
+            if self._process and self._process.poll() is None:
+                return False
+            if self._state == ModuleState.LAUNCHED:
+                self._state = ModuleState.DONE
+            return True
+
+        # No model yet. While the trainer is alive that is just progress.
+        if self._process is None or self._process.poll() is None:
             return False
-        if self._process and self._process.poll() is None:
+
+        # ★ The trainer exited without producing a model. Report it, rather than
+        # returning False forever: the controller only leaves its wait loop on
+        # is_done() or state == FAILED, so a crash used to sit there until the
+        # 72h timeout. A launch that dies on its first import -- a missing
+        # dependency, say -- would burn three days looking like training.
+        returncode = self._process.returncode
+        if returncode != 0:
+            self._state = ModuleState.FAILED
+            self._log(
+                f"trainer exited {returncode} without producing a model; "
+                f"see {Path(self.output_paths['base_dir']) / 'rl_training.log'}"
+            )
             return False
-        if self._state == ModuleState.LAUNCHED:
-            self._state = ModuleState.DONE
-        return True
+
+        # A clean exit still needs a grace window: CheckpointMonitor promotes the
+        # final checkpoint on its own poll interval, so the model can appear a
+        # beat after the process ends.
+        if self._exit_seen_at is None:
+            self._exit_seen_at = time.monotonic()
+            return False
+        grace = float(self.config.get("poll_interval", 30)) * 3
+        if time.monotonic() - self._exit_seen_at > grace:
+            self._state = ModuleState.FAILED
+            self._log(
+                f"trainer exited 0 but no model was promoted within {grace:.0f}s; "
+                f"see {Path(self.output_paths['base_dir']) / 'rl_training.log'}"
+            )
+        return False
 
     def kill(self) -> None:
         if self._ckpt_monitor:

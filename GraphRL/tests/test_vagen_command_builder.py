@@ -11,6 +11,7 @@ Run directly with::
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -45,7 +46,15 @@ def _value_of(cmd, key):
 @needs_vagen
 def test_entrypoint_is_the_current_one() -> None:
     # vagen.main_ppo is gone; a stale entrypoint fails as a bare ModuleNotFoundError.
-    assert _cmd()[:3] == ["python3", "-m", "vagen.training.main"]
+    assert _cmd()[1:3] == ["-m", "vagen.training.main"]
+
+
+@needs_vagen
+def test_child_runs_under_this_interpreter_not_whatever_is_on_path() -> None:
+    # A bare "python3" resolves in the child from PATH -- typically conda `base`,
+    # which has no hydra. That surfaced as ModuleNotFoundError from a launcher
+    # that had just imported hydra successfully itself.
+    assert _cmd()[0] == sys.executable
 
 
 @needs_vagen

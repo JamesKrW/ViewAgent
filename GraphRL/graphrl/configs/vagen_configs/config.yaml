@@ -25,19 +25,79 @@ training_steps: 5
 
 # --- Hydra overrides ---
 # Flattened into Hydra CLI args and passed to VAGEN. Highest priority.
+#
+# Empty on purpose. Every setting GraphRL used to force here is now either a
+# VAGEN default already, or a key this VAGEN does not have:
+#
+#   trainer.val_before_train         already True
+#   trainer.save_best_val            renamed to trainer.save_best_actor, already True
+#   huggingface_hub.hf_save_freq     already null (the pipeline promotes
+#                                    checkpoints itself via checkpoint_monitor.py)
+#   trainer.skip_special_tokens_val  NO EQUIVALENT -- see below
+#   trainer.skip_special_tokens_train
+#
+# Restating a default turns a backend upgrade into a silent no-op, and setting a
+# key the schema does not have is a hard Hydra error at launch (struct mode), not
+# a warning -- which is how the first three were found.
+#
+# ★ The two skip_special_tokens flags have no replacement. GraphRL's TrajToSFT
+# phase parses rollout text, so it depends on special tokens surviving into the
+# dumped rollouts. VAGEN handles decoding internally now (see
+# vagen/models/_common/image_tokens.py and trainer.replace_image_tokens_for_logging)
+# rather than exposing a trainer flag. If TrajToSFT starts producing empty or
+# malformed turns, check that first.
 hydra_overrides:
-  trainer:
-    # The pipeline validates between iterations and reads the curve to decide
-    # whether to keep doing RL, so a run that never validated before training
-    # has no baseline to compare its first result against.
-    val_before_train: true
-    # GraphRL's TrajToSFT phase parses rollout text, so specials must survive.
-    # VAGEN's default drops them in validation.
-    skip_special_tokens_val: false
-    skip_special_tokens_train: false
-  huggingface_hub:
-    # The pipeline promotes checkpoints itself (graphrl/utils/checkpoint_monitor.py)
-    # and pushes at the iteration boundary, so the trainer's own uploader stays
-    # off unless an experiment turns it on.
-    hf_save_freq: null
-    repo_id: graphrl-vagen-training
+  actor_rollout_ref:
+    rollout:
+      # ★ sglang, overriding the `vllm` that VAGEN's baseline_vllm.flags selects.
+      # This is a project decision: ViewAgent standardises on sglang across its
+      # stack, so the engine is chosen here rather than left to the flags file
+      # (which is named for the choice it makes).
+      #
+      # Worth knowing what it costs: VAGEN's setup.py calls the vllm extra "the
+      # verified default", and install.sh warns the sglang extra is not the
+      # tested path. The pins are otherwise identical --
+      # torch 2.11.0 + transformers[kernels] 5.12.1 -- and differ only in
+      # sglang[srt,openai]==0.5.15 vs vllm==0.22.0.
+      #
+      # The two engines are NOT co-installable: each pins a different flashinfer
+      # patch version, so pip refuses them together. One engine per environment.
+      #   vllm   0.22.0 -> flashinfer 0.6.11.post2
+      #   sglang 0.5.15 -> flashinfer 0.6.12
+      name: sglang
+      # ★ Do not hand the KV cache back between rollouts.
+      #
+      # With this True (verl's default) the colocated loop calls
+      # release_memory_occupation / resume_memory_occupation around every weight
+      # sync, which drives sglang's torch_memory_saver over CUDA VMM. On this box
+      # the resume aborts the sglang HTTP server outright --
+      #
+      #   CUDA error: invalid argument  ->  Fatal Python error: Aborted
+      #
+      # and the trainer only ever sees "Failed to complete async request to
+      # resume_memory_occupation after 3 attempts", which names the symptom and
+      # not the dead server. sglang_rollout.py gates both calls on this flag, so
+      # False removes the VMM path entirely.
+      #
+      # The cost is that sglang keeps its reservation while the actor and critic
+      # train, which is why gpu_memory_utilization is set low in the pipelines.
+      # These are 143 GB cards; there is room for both.
+      free_cache_engine: false
+      engine_kwargs:
+        sglang:
+          # ...and do not build the memory saver in the first place.
+          #
+          # free_cache_engine above stops verl *calling* release/resume, but
+          # async_sglang_server.py hardcodes `enable_memory_saver: True` when it
+          # constructs the engine, so the CUDA MemPool still exists -- and the
+          # next weight sync aborts the server in its destructor:
+          #
+          #   at::cuda::MemPool::~MemPool()  ->  Fatal Python error: Aborted
+          #
+          # surfacing to the trainer as "Failed to complete async request to
+          # update_weights_from_tensor after 3 attempts".
+          #
+          # This is reachable without patching verl only because the engine
+          # builds its arguments with `**engine_kwargs` spread LAST, after the
+          # hardcoded value. Worth knowing if that line ever moves.
+          enable_memory_saver: false

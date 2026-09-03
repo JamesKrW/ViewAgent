@@ -99,6 +99,7 @@ for task in habitat_gs_interactive_view_planning \
             iterations=1 \
             general_overrides.rl.hydra_overrides.trainer.n_gpus_per_node=4 \
             general_overrides.rl.hydra_overrides.data.train_batch_size=8 \
+            general_overrides.rl.hydra_overrides.actor_rollout_ref.actor.ppo_mini_batch_size=8 \
             iteration_overrides.iter0.rl.training_steps=2 \
             +iteration_overrides.iter0.traj_to_sft=null \
             iteration_overrides.iter0.sft=null

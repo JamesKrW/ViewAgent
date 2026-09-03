@@ -57,10 +57,13 @@ general_overrides:
         rollout:
           n: 1
           tensor_model_parallel_size: 1
-          gpu_memory_utilization: 0.6
+          # Low, because the engine now keeps its reservation for the whole run:
+          # free_cache_engine is off (see vagen_configs/config.yaml), so whatever
+          # is claimed here is unavailable to the actor and critic for the entire
+          # iteration rather than just during rollout.
+          gpu_memory_utilization: 0.4
           max_num_batched_tokens: 32768
           enforce_eager: true
-          free_cache_engine: true
           enable_chunked_prefill: true
           log_prob_micro_batch_size_per_gpu: 2
         ref:
