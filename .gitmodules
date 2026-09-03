@@ -5,4 +5,4 @@
 [submodule "GraphRL/VAGEN"]
 	path = GraphRL/VAGEN
 	url = https://github.com/JamesKrW/VAGEN.git
-	branch = main
+	branch = dev/viewagent
