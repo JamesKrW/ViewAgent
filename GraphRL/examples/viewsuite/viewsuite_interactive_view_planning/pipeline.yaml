@@ -72,7 +72,7 @@ general_overrides:
         corpus_dir: null       # ScanNet's step is uniform; no per-scene table needed
         step_translation: 0.5
         step_rotation: 30.0
-        size: 512
+        size: 256
         render_chunk: 32
         max_scene_concurrency: 8
     generators:
