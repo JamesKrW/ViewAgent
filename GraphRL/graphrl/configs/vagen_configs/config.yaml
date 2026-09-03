@@ -50,39 +50,16 @@ hydra_overrides:
   actor_rollout_ref:
     rollout:
       # ★ sglang, overriding the `vllm` that VAGEN's baseline_vllm.flags selects.
-      # This is a project decision: ViewAgent standardises on sglang across its
-      # stack, so the engine is chosen here rather than left to the flags file
-      # (which is named for the choice it makes).
+      # ViewAgent standardises on sglang, and the version set in
+      # conda_envs/verl_sglang058 is the one verified to run this stack:
+      # sglang 0.5.8 + flashinfer 0.6.1 + torch 2.9.1+cu128 + transformers 4.57.1.
       #
-      # Worth knowing what it costs: VAGEN's setup.py calls the vllm extra "the
-      # verified default", and install.sh warns the sglang extra is not the
-      # tested path. The pins are otherwise identical --
-      # torch 2.11.0 + transformers[kernels] 5.12.1 -- and differ only in
-      # sglang[srt,openai]==0.5.15 vs vllm==0.22.0.
-      #
-      # The two engines are NOT co-installable: each pins a different flashinfer
-      # patch version, so pip refuses them together. One engine per environment.
-      #   vllm   0.22.0 -> flashinfer 0.6.11.post2
-      #   sglang 0.5.15 -> flashinfer 0.6.12
+      # Not sglang 0.5.15. That is what VAGEN's setup.py pins so its two engine
+      # extras can share a torch, and it drags transformers to 5.12.1 -- whose VL
+      # module tree and multimodal processor sglang's runtime paths have not
+      # caught up with. VAGEN's own comment records the trade: "sglang 0.5.15,
+      # not the 0.5.8 verl main declares".
       name: sglang
-      # ★ Do not hand the KV cache back between rollouts.
-      #
-      # With this True (verl's default) the colocated loop calls
-      # release_memory_occupation / resume_memory_occupation around every weight
-      # sync, which drives sglang's torch_memory_saver over CUDA VMM. On this box
-      # the resume aborts the sglang HTTP server outright --
-      #
-      #   CUDA error: invalid argument  ->  Fatal Python error: Aborted
-      #
-      # and the trainer only ever sees "Failed to complete async request to
-      # resume_memory_occupation after 3 attempts", which names the symptom and
-      # not the dead server. sglang_rollout.py gates both calls on this flag, so
-      # False removes the VMM path entirely.
-      #
-      # The cost is that sglang keeps its reservation while the actor and critic
-      # train, which is why gpu_memory_utilization is set low in the pipelines.
-      # These are 143 GB cards; there is room for both.
-      free_cache_engine: false
       # sglang matches string stop conditions by decoding, so it needs the
       # tokenizer. verl defaults this to True and VAGEN's dataset defaults
       # stop_strings to ["</answer>"], which together give
@@ -90,21 +67,23 @@ hydra_overrides:
       # at the first generation. vLLM does not care, which is why the default is
       # what it is.
       skip_tokenizer_init: false
+      # ★ Host-specific, not stack-specific. On the H200 box the colocated loop's
+      # release/resume around each weight sync drives sglang's torch_memory_saver
+      # over CUDA VMM and aborts the server:
+      #
+      #   CUDA error: invalid argument -> at::cuda::MemPool::~MemPool()
+      #   -> Fatal Python error: Aborted
+      #
+      # reaching the trainer only as "Failed to complete async request to
+      # resume_memory_occupation after 3 attempts". It reproduces on the verified
+      # A100 version set too, so it is the machine and not the pins -- the
+      # reference deployment is A100-80GB and does not hit it.
+      #
+      # sglang_rollout.py gates the calls on free_cache_engine; the engine builds
+      # the pool regardless, so enable_memory_saver has to go too. That one is
+      # reachable without patching verl only because async_sglang_server.py
+      # spreads **engine_kwargs last, after its hardcoded True.
+      free_cache_engine: false
       engine_kwargs:
         sglang:
-          # ...and do not build the memory saver in the first place.
-          #
-          # free_cache_engine above stops verl *calling* release/resume, but
-          # async_sglang_server.py hardcodes `enable_memory_saver: True` when it
-          # constructs the engine, so the CUDA MemPool still exists -- and the
-          # next weight sync aborts the server in its destructor:
-          #
-          #   at::cuda::MemPool::~MemPool()  ->  Fatal Python error: Aborted
-          #
-          # surfacing to the trainer as "Failed to complete async request to
-          # update_weights_from_tensor after 3 attempts".
-          #
-          # This is reachable without patching verl only because the engine
-          # builds its arguments with `**engine_kwargs` spread LAST, after the
-          # hardcoded value. Worth knowing if that line ever moves.
           enable_memory_saver: false
