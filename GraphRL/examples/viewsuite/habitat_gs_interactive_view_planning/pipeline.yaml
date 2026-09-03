@@ -80,7 +80,7 @@ general_overrides:
         # Habitat-GS scales the step per scene (0.25-8 m); corpus_dir supplies the
         # real value per scene and this global is only the fallback.
         step_rotation: 30.0
-        size: 512
+        size: 256
         render_chunk: 32
         max_scene_concurrency: 8
     generators:

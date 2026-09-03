@@ -8,7 +8,7 @@ envs:
     max_env_response_per_turn: 8192
     config:
       jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/habitat_gs/interactive_view_planning_train.jsonl
-      image_size: [512, 512]
+      image_size: [256, 256]
       format: eval_mode
       use_example_in_sys_prompt: false
       client_url_file_path: ${oc.env:VIEWSUITE_ROOT}/client_url_habitat_gs.txt

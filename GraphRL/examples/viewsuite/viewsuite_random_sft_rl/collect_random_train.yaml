@@ -27,7 +27,7 @@ envs:
       max_turns: 10
       render_backend: client
       client_url_file_path: ${fileroot}/client_url.txt
-      image_size: [512, 512]
+      image_size: [256, 256]
       format: eval_mode
       use_example_in_sys_prompt: false
       action_only_mode: true

@@ -79,7 +79,7 @@ general_overrides:
         step_translation: 0.5
         # AI2-THOR's grid step is uniform, so the global value is the real one.
         step_rotation: 30.0
-        size: 512
+        size: 256
         render_chunk: 32
         max_scene_concurrency: 8
     generators:
