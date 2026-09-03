@@ -9,7 +9,7 @@ Plain utility class; no registry. Instantiate it directly inside
 import logging
 import re
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from graphrl.traj_to_sft.utils.graph_builder import VagenGraphBuilder, VagenNodeData, VagenEdgeData
 from graphrl.traj_to_sft.utils.base_graph import NodeData, EdgeData
@@ -63,6 +63,7 @@ class SokobanTextGraphBuilder(VagenGraphBuilder):
         _rollout_dir: Path,
         _step_idx: int,
         _line_idx: int,
+        episode_data: Optional[Dict[str, Any]] = None,
     ) -> List[Tuple[NodeData, EdgeData, NodeData]]:
         """
         Extract (src_grid, action, dst_grid) from one Sokoban episode.
@@ -76,6 +77,7 @@ class SokobanTextGraphBuilder(VagenGraphBuilder):
           user s0 → assistant ∅ → user s1 → assistant a1 → user s2
           ⇒ only (s1, a1, s2) is emitted  (not the broken (s0, ∅, s1))
         """
+        del episode_data
         transitions: List[Tuple[NodeData, EdgeData, NodeData]] = []
         current_state: Optional[str] = None
         pending_action: Optional[str] = None

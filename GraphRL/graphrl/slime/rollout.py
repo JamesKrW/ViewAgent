@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from vagen_agent.rollout.runner import _build_episode, _get_context
+from vagen_agent.rollout.runner import _build_episode, _get_context, _run_episode
 from vagen_agent.rollout.trajectory import assemble, dropped_sample, episode_status
 from view_suite.envs.slime_adapter import register_viewsuite_envs
 
@@ -91,6 +91,25 @@ def _capture_images_enabled(ctx) -> bool:
         return enabled
 
 
+def _episode_metadata(env: Any) -> dict[str, Any]:
+    """Return stable episode identity retained by the VAGEN env adapter.
+
+    ``ViewSuiteSlimeEnv.close()`` releases its legacy delegate, so fields such
+    as ``delegate.current_item`` are no longer reachable when export runs.  The
+    reset ``info`` is deliberately retained by ``BaseVagenEnv`` and contains
+    the same identity without extending the environment lifetime.
+    """
+
+    metadata: dict[str, Any] = {}
+    reset_info = getattr(env, "reset_info", None)
+    if isinstance(reset_info, dict):
+        for name in ("scene_id", "sample_id"):
+            value = reset_info.get(name)
+            if value is not None:
+                metadata[name] = value
+    return metadata
+
+
 def _stage_episode(
     ctx,
     record,
@@ -98,6 +117,7 @@ def _stage_episode(
     spec,
     rollout_id: int,
     metrics: dict[str, float],
+    episode_metadata: dict[str, Any] | None = None,
 ) -> str | None:
     root_value = ctx.run.extra.get("legacy_rollout_dir")
     if not root_value:
@@ -141,6 +161,7 @@ def _stage_episode(
 
     record_path = episode_dir / "record.json"
     temporary = episode_dir / ".record.json.tmp"
+    episode_metadata = dict(episode_metadata or {})
     temporary.write_text(
         json.dumps(
             {
@@ -155,6 +176,10 @@ def _stage_episode(
                 ),
                 "env_name": spec.env_name,
                 "seed": spec.seed,
+                # The Habitat-GS IVP prompt intentionally omits the scene name.
+                # Keep identity as structured rollout data instead of requiring
+                # downstream graph builders to scrape a particular prompt format.
+                **episode_metadata,
                 "images": image_names,
             },
             ensure_ascii=False,
@@ -173,9 +198,11 @@ async def generate(args, sample, sampling_params, evaluation: bool = False):
     spec, record, client, env, harness = _build_episode(args, ctx, sample)
     client.sampling_params.update(sampling_params or {})
     try:
-        await harness.run_episode(client, env)
+        await _run_episode(harness, client, env, record)
     finally:
         await env.close()
+
+    episode_metadata = _episode_metadata(env)
 
     if ctx.run.transcript_dir:
         from vagen_agent.rollout.dump import dump_episode
@@ -195,12 +222,21 @@ async def generate(args, sample, sampling_params, evaluation: bool = False):
             "source_name": spec.source_name,
             "env_name": spec.env_name,
             "metrics": metrics,
+            **episode_metadata,
         },
     )
     if not samples:
         samples = [dropped_sample(sample, "the model never spoke in any conversation")]
     if not evaluation:
-        key = _stage_episode(ctx, record, sample, spec, _rollout_id(), metrics)
+        key = _stage_episode(
+            ctx,
+            record,
+            sample,
+            spec,
+            _rollout_id(),
+            metrics,
+            episode_metadata,
+        )
         for output in samples:
             output.metadata = dict(getattr(output, "metadata", None) or {})
             output.metadata["graphrl_rollout_key"] = key

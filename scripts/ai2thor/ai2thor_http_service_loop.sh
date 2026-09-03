@@ -10,7 +10,7 @@
 #         ai2thor_http_service_2.log
 #         ...
 #
-# Usage (arg order matches scripts/scannet_http_service_loop.sh for consistency):
+# Usage (arg order matches scripts/scannet/scannet_http_service_loop.sh for consistency):
 #   ./ai2thor_http_service_loop.sh [MAX_WORKERS] [GPU_IDS] [OMP_CAP] [PORT] [T]
 #
 # Examples:

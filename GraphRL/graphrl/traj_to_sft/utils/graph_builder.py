@@ -183,6 +183,7 @@ class VagenGraphBuilder:
         rollout_dir: Path,
         step_idx: int,
         line_idx: int,
+        episode_data: Optional[Dict[str, Any]] = None,
     ) -> List[Tuple[NodeData, EdgeData, NodeData]]:
         """Return list of (src_node, edge_data, dst_node) from one episode."""
         ...
@@ -344,7 +345,11 @@ class VagenGraphBuilder:
                             continue
                         messages = self._parse_vagen_line(data)
                         transitions = self.traj_to_transitions(
-                            messages, rollout_dir, step_idx, line_idx,
+                            messages,
+                            rollout_dir,
+                            step_idx,
+                            line_idx,
+                            episode_data=data,
                         )
                         self._apply_transitions(graph, transitions, images_dir)
             except Exception as exc:

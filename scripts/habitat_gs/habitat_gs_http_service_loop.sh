@@ -29,5 +29,5 @@ export SCANNET_ROOT=${HABITAT_GS_ROOT:-$VIEWSUITE_ROOT/data/gs_scenes}
 export HABITAT_SIM_LOG=${HABITAT_SIM_LOG:-quiet}
 export MAGNUM_LOG=${MAGNUM_LOG:-quiet}
 
-exec bash scripts/scannet_http_service_loop.sh \
+exec bash scripts/scannet/scannet_http_service_loop.sh \
   "$MAX_WORKERS" "$GPU_IDS" "$OMP_CAP" "$PORT" "$RESTART_INTERVAL" habitat_gs

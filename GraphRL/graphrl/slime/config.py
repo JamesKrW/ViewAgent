@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +38,7 @@ class SlimeLaunchSpec:
     num_gpus: int
     actor_gpus: int
     rollout_gpus: int
+    colocate: bool
     tensor_parallel_size: int
     rollout_tensor_parallel_size: int
     rollout_max_context_len: int
@@ -75,6 +76,24 @@ class SlimeLaunchSpec:
     rollout_only: bool
     chat_template_kwargs: str
     megatron_model_type: str | None
+    # Diagnostic escape hatch for runtimes where CUDA graph capture is known
+    # to be unsupported. Normal GraphRL/SLIME runs leave CUDA graphs enabled.
+    sglang_disable_cuda_graph: bool = False
+    # Extra Megatron args for the actor role, passed straight through to
+    # SLIME's per-role override seam. Colocate parks the whole optimizer on
+    # GPU and the memory saver must re-back all of it every wake_up, so
+    # `optimizer_cpu_offload` is the knob that makes 80GB hosts viable.
+    megatron_actor_overrides: dict[str, Any] = field(default_factory=dict)
+    # Long-tail control. SLIME only aborts still-flying samples once
+    # `rollout_batch_size` of them have *finished*, so leaving
+    # over_sampling_batch_size at the batch size gives it no slack and the step
+    # waits on the slowest trajectory -- measured: 126/128 done in 10s at
+    # 7431 tok/s, then 10+ min at one request and ~1 tok/s. Oversampling
+    # creates the slack; partial_rollout recycles the aborted work instead of
+    # discarding it.
+    over_sampling_batch_size: int | None = None
+    partial_rollout: bool = False
+    mask_offpolicy_in_partial_rollout: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -124,12 +143,25 @@ def build_launch_spec(
     }.get(raw_algorithm, raw_algorithm)
 
     num_gpus = int(_first(direct.get("num_gpus"), trainer.get("n_gpus_per_node"), default=8))
-    actor_gpus = int(_first(direct.get("actor_gpus"), default=max(1, num_gpus // 2)))
-    rollout_gpus = int(_first(direct.get("rollout_gpus"), default=num_gpus - actor_gpus))
-    if actor_gpus < 1 or rollout_gpus < 1 or actor_gpus + rollout_gpus > num_gpus:
+    colocate = bool(direct.get("colocate", False))
+    actor_gpus = int(
+        _first(
+            direct.get("actor_gpus"),
+            default=num_gpus if colocate else max(1, num_gpus // 2),
+        )
+    )
+    rollout_gpus = int(
+        _first(
+            direct.get("rollout_gpus"),
+            default=actor_gpus if colocate else num_gpus - actor_gpus,
+        )
+    )
+    requested_gpus = max(actor_gpus, rollout_gpus) if colocate else actor_gpus + rollout_gpus
+    if actor_gpus < 1 or rollout_gpus < 1 or requested_gpus > num_gpus:
+        placement = "colocated" if colocate else "disjoint"
         raise ValueError(
-            "SLIME needs disjoint positive actor_gpus and rollout_gpus whose sum "
-            f"does not exceed num_gpus; got {actor_gpus}+{rollout_gpus}>{num_gpus}"
+            f"SLIME needs positive {placement} actor/rollout GPU counts within num_gpus; "
+            f"got actor_gpus={actor_gpus}, rollout_gpus={rollout_gpus}, num_gpus={num_gpus}"
         )
 
     response = int(_first(direct.get("rollout_max_response_len"), data.get("max_response_length"), default=4096))
@@ -162,6 +194,7 @@ def build_launch_spec(
         num_gpus=num_gpus,
         actor_gpus=actor_gpus,
         rollout_gpus=rollout_gpus,
+        colocate=colocate,
         tensor_parallel_size=int(direct.get("tensor_parallel_size", 1)),
         rollout_tensor_parallel_size=int(_first(direct.get("rollout_tensor_parallel_size"), rollout.get("tensor_model_parallel_size"), default=1)),
         rollout_max_context_len=int(direct.get("rollout_max_context_len", prompt + response)),
@@ -201,6 +234,17 @@ def build_launch_spec(
         rollout_only=bool(direct.get("rollout_only", False)),
         chat_template_kwargs=str(direct.get("chat_template_kwargs", "")),
         megatron_model_type=(str(direct["megatron_model_type"]) if direct.get("megatron_model_type") else None),
+        sglang_disable_cuda_graph=bool(direct.get("sglang_disable_cuda_graph", False)),
+        megatron_actor_overrides=dict(direct.get("megatron_actor_overrides") or {}),
+        over_sampling_batch_size=(
+            int(direct["over_sampling_batch_size"])
+            if direct.get("over_sampling_batch_size") is not None
+            else None
+        ),
+        partial_rollout=bool(direct.get("partial_rollout", False)),
+        mask_offpolicy_in_partial_rollout=bool(
+            direct.get("mask_offpolicy_in_partial_rollout", False)
+        ),
     )
 
 

@@ -35,4 +35,11 @@ Changes retained inside the pinned backend are limited to:
 - `slime/utils/torch_memory_saver_utils.py` and `slime/ray/actor_group.py`:
   CUDA-version-aware memory-saver preload handling
 - `slime/utils/external_utils/command_utils.py`: reliable local Ray dashboard startup
+- `vagen_agent/rollout/frames.py` and `vagen_agent/rollout/dump.py`: frame keys are
+  hashed over raw pixels instead of PNG bytes, and frames encode as JPEG q90 by default
+  (`VAGEN_FRAME_FORMAT=PNG` / `VAGEN_FRAME_QUALITY` override it). The old path
+  PNG-encoded every frame just to compute its key, on the rollout event loop, which
+  serialised all concurrent episodes behind one encode. Hashing pixels is both cheaper
+  and lossless, and frames already in the table now skip encoding entirely. The JPEG
+  default is lossy; set `VAGEN_FRAME_FORMAT=PNG` where that matters.
 - corresponding focused regression tests

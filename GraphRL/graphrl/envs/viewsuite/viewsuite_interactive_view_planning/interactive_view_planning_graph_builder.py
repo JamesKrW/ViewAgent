@@ -53,14 +53,31 @@ _VALID_ACTIONS = frozenset({
     "look_up", "look_down", "rotate_cw", "rotate_ccw",
 })
 
+# Habitat-GS' compact IVP environment uses viewer keys while the graph and SFT
+# generators use corpus-independent semantic action names.  Normalise at the
+# ingestion boundary; ScanNet/AI2-THOR's existing semantic names pass through.
+_ACTION_ALIASES = {
+    "w": "move_forward",
+    "s": "move_backward",
+    "a": "move_left",
+    "d": "move_right",
+    "z": "move_up",
+    "x": "move_down",
+    "arrow_left": "turn_left",
+    "arrow_right": "turn_right",
+    "arrow_up": "look_up",
+    "arrow_down": "look_down",
+}
+
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _parse_pose(text: str) -> Optional[Dict[str, float]]:
+def _parse_pose(text: str, *, last: bool = False) -> Optional[Dict[str, float]]:
     """Extract 6-DoF camera pose from text like [tx=1.23, ty=4.56, ...]."""
-    m = _POSE_RE.search(text)
-    if not m:
+    matches = list(_POSE_RE.finditer(text))
+    if not matches:
         return None
+    m = matches[-1] if last else matches[0]
     return {
         "tx": float(m.group(1)),
         "ty": float(m.group(2)),
@@ -90,6 +107,7 @@ def _clean_action(action: str) -> Optional[str]:
     Returns the cleaned ``|``-joined string, or ``None`` if nothing valid.
     """
     parts = [a.strip().lower() for a in action.split("|")]
+    parts = [_ACTION_ALIASES.get(a, a) for a in parts]
     valid = [a for a in parts if a in _VALID_ACTIONS]
     return " | ".join(valid) if valid else None
 
@@ -372,6 +390,7 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
         rollout_dir: Path,
         step_idx: int,
         line_idx: int,
+        episode_data: Optional[Dict[str, Any]] = None,
     ) -> List[Tuple[NodeData, EdgeData, NodeData]]:
         """
         Extract (src_pose, action, dst_pose) transitions from one episode.
@@ -386,27 +405,30 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
         """
         image_base = rollout_dir / f"image_{step_idx}" / f"images_{line_idx}"
 
-        # Extract scene_id from the first user message. Handles both ScanNet
-        # ("You're in the scene scene0353_02.") and AI2-THOR ("... FloorPlan2.").
-        scene_id = None
-        for msg in messages:
-            if msg["role"] == "user":
-                m = _SCENE_LINE_RE.search(msg["content"])
-                if m:
-                    scene_id = m.group(1)
-                else:  # pre-standardisation rollouts
-                    m = _SCENE_ID_RE.search(msg["content"])
+        # New rollouts carry scene identity structurally. Keep prompt parsing as
+        # backward compatibility for historical ScanNet/AI2-THOR files.
+        explicit_scene_id = (episode_data or {}).get("scene_id")
+        scene_id = str(explicit_scene_id).strip() if explicit_scene_id else None
+        if scene_id is None:
+            for msg in messages:
+                if msg["role"] == "user":
+                    m = _SCENE_LINE_RE.search(msg["content"])
                     if m:
-                        scene_id = f"scene{m.group(1)}"
-                    else:
-                        m2 = _THOR_SCENE_ID_RE.search(msg["content"])
-                        if m2:
-                            scene_id = m2.group(1)
-                break
+                        scene_id = m.group(1)
+                    else:  # pre-standardisation rollouts
+                        m = _SCENE_ID_RE.search(msg["content"])
+                        if m:
+                            scene_id = f"scene{m.group(1)}"
+                        else:
+                            m2 = _THOR_SCENE_ID_RE.search(msg["content"])
+                            if m2:
+                                scene_id = m2.group(1)
+                    break
         if scene_id is None:
             # Unset, not a placeholder: downstream checks test for emptiness.
             logger.warning(
-                "[graph] no scene id in the first user message of %s step %d line %d; "
+                "[graph] no scene id in rollout metadata or the first user message of "
+                "%s step %d line %d; "
                 "this episode's edges cannot be atomized and will be dropped",
                 rollout_dir, step_idx, line_idx,
             )
@@ -422,15 +444,25 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
             content = msg["content"]
 
             if role == "user":
-                pose = _parse_pose(content)
+                # Habitat-GS repeats TARGET, TOP-DOWN and the full explored
+                # trajectory every turn.  Its current state is therefore the
+                # final trajectory pose/image, not the first pose/image (which
+                # belongs to the top-down reference).  Legacy ViewSuite prompts
+                # retain their original first-pose/first-image behaviour.
+                self_contained = "EXPLORED TRAJECTORY" in content
+                pose = _parse_pose(content, last=self_contained)
+                num_images = _count_images(content)
                 if pose is None:
-                    global_img_idx += _count_images(content)
+                    global_img_idx += num_images
                     continue
 
-                num_images = _count_images(content)
                 obs_img_path = None
                 if num_images > 0:
-                    obs_img_idx = global_img_idx
+                    obs_img_idx = (
+                        global_img_idx + num_images - 1
+                        if self_contained
+                        else global_img_idx
+                    )
                     for suffix in (".png", ".jpg"):
                         candidate = image_base / f"{obs_img_idx}{suffix}"
                         if candidate.exists():

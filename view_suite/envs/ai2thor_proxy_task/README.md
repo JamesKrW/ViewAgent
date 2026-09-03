@@ -52,12 +52,12 @@ python -c "from view_suite.envs.utils.split_jsonl_by_scene import split_jsonl_by
 
 The filter removes ~26% of samples. The released split is 120 scenes → 2,880 samples per
 task → **train 1,468 / eval 325 / test 331**, over 84/18/18 disjoint scenes.
-`bash scripts/download_ai2thor.sh` fetches the prepared copy instead of regenerating.
+`bash scripts/ai2thor/download_ai2thor_client_data.sh` fetches the prepared copy instead of regenerating.
 
 ## Render service (IVP only)
 
 ```bash
-bash scripts/ai2thor_http_service_loop.sh          # on a machine with a graphics stack
+bash scripts/ai2thor/ai2thor_http_service_loop.sh          # on a machine with a graphics stack
 echo "http://<host>:<port>" > client_url_ai2thor.txt
 ```
 
@@ -91,7 +91,7 @@ from those rollouts, distil supervision) → SFT → the next iteration's starti
 ## Results
 
 Numbers are not kept in the repo. Regenerate with
-`scripts/build_ai2thor_results_table.py` (base + trained + frontier) or
+`scripts/ai2thor/build_ai2thor_results_table.py` (base + trained + frontier) or
 `examples/evaluation/eval_all_openrouter_ai2thor/build_ai2thor_table_full.py`.
 
 The turn split the table uses is short (<=2 turns) versus long (>2).

@@ -3,7 +3,7 @@
 #
 # Assumes:
 #   - build_manifest.py has produced viewagent15k_scannet_gs_test_manifest.jsonl
-#   - scripts/download_scannet_3dgs.sh has populated /root/projects/viewsuite/data/scannet_3dgs_mcmc/
+#   - scripts/scannet/download_scannet_service_3dgs.sh has populated /root/projects/viewsuite/data/scannet_3dgs_mcmc/
 #
 # Usage:
 #   ./regen_viewsuite_gs.sh

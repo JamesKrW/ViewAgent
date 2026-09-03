@@ -5,7 +5,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from graphrl.adaptive.model import write_checkpoint_manifest
-from graphrl.llama_factory.lf_wrapper import LFWrapper
+from graphrl.llama_factory.lf_wrapper import (
+    LFWrapper,
+    _ensure_torchrun_on_path,
+    _llamafactory_cli_command,
+)
 from graphrl.state import ModuleState
 from graphrl.traj_to_sft.traj_to_sft_base import TrajToSFTModule, TrajToSFTPaths
 from graphrl.utils.progress import detect_progress
@@ -15,6 +19,56 @@ def _model(path: Path) -> None:
     path.mkdir(parents=True)
     (path / "config.json").write_text("{}\n", encoding="utf-8")
     (path / "model.safetensors").write_bytes(b"weights")
+
+
+def test_llamafactory_command_uses_console_script_when_available(tmp_path, monkeypatch):
+    config = tmp_path / "sft.yaml"
+    monkeypatch.setattr("graphrl.llama_factory.lf_wrapper.shutil.which", lambda _: "/bin/lf")
+
+    assert _llamafactory_cli_command("train", config) == [
+        "/bin/lf", "train", str(config),
+    ]
+
+
+def test_llamafactory_command_falls_back_to_current_python(tmp_path, monkeypatch):
+    config = tmp_path / "sft.yaml"
+    monkeypatch.setattr("graphrl.llama_factory.lf_wrapper.shutil.which", lambda _: None)
+    monkeypatch.setattr("graphrl.llama_factory.lf_wrapper.sys.executable", "/env/python")
+
+    assert _llamafactory_cli_command("export", config) == [
+        "/env/python", "-m", "llamafactory.cli", "export", str(config),
+    ]
+
+
+def test_sft_exposes_current_environment_torchrun_when_path_is_not_activated(
+    tmp_path, monkeypatch,
+):
+    python_bin = tmp_path / "env" / "bin"
+    python_bin.mkdir(parents=True)
+    (python_bin / "torchrun").touch()
+    monkeypatch.setattr(
+        "graphrl.llama_factory.lf_wrapper.sys.executable", str(python_bin / "python")
+    )
+    monkeypatch.setattr(
+        "graphrl.llama_factory.lf_wrapper.shutil.which", lambda *_args, **_kwargs: None
+    )
+    env = {"PATH": "/usr/bin"}
+
+    _ensure_torchrun_on_path(env)
+
+    assert env["PATH"] == f"{python_bin}:/usr/bin"
+
+
+def test_sft_preserves_existing_relocated_torchrun_shim(monkeypatch):
+    monkeypatch.setattr(
+        "graphrl.llama_factory.lf_wrapper.shutil.which",
+        lambda *_args, **_kwargs: "/tmp/conda-entrypoints/torchrun",
+    )
+    env = {"PATH": "/tmp/conda-entrypoints:/usr/bin"}
+
+    _ensure_torchrun_on_path(env)
+
+    assert env["PATH"] == "/tmp/conda-entrypoints:/usr/bin"
 
 
 def test_fixed_resume_rejects_uncommitted_slime_rl_model(tmp_path):

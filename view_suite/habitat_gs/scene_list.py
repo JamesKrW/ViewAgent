@@ -45,7 +45,7 @@ def scene_dir(root: str, scene_id: str, split: Optional[str] = None) -> str:
             return d
     raise FileNotFoundError(
         f"scene {scene_id!r} not found under {root}/{{{','.join(SPLITS)}}}. "
-        f"Did you run scripts/download_habitat_gs.sh?"
+        f"Did you run scripts/habitat_gs/download_habitat_gs_service_data.sh?"
     )
 
 

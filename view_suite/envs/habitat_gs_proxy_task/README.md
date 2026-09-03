@@ -61,7 +61,7 @@ Habitat-GS's own navigation numbers without an asterisk.
 export VIEWSUITE_ROOT=$(pwd)
 
 # 1. scenes (~30 GB, public, no token)
-bash scripts/download_habitat_gs.sh
+bash scripts/habitat_gs/download_habitat_gs_service_data.sh
 
 # 2. generate. Resumable: a scene with a .done marker is skipped.
 ~/miniconda3/envs/habitat-gs/bin/python -m \
@@ -201,7 +201,7 @@ worker pool, GPU pinning, TLS and multipart protocol.
 
 ```bash
 export VIEWSUITE_ROOT=$(pwd)
-bash scripts/habitat_gs_http_service_loop.sh          # 136 workers, 8 GPUs, :8812
+bash scripts/habitat_gs/habitat_gs_http_service_loop.sh          # 136 workers, 8 GPUs, :8812
 echo "http://<host>:8812" > client_url_habitat_gs.txt
 ```
 

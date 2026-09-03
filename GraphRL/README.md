@@ -128,6 +128,7 @@ general_overrides:
       num_gpus: 8
       actor_gpus: 4
       rollout_gpus: 4
+      colocate: false
       eval_interval: 20
       save_interval: 20
       rollout_max_prompt_len: 4000
@@ -140,6 +141,10 @@ general_overrides:
 Historical `hydra_overrides` fields that occur in existing configs are
 translated once by `graphrl.slime.config`; they are never passed to the old
 Hydra/verl trainer. New experiments should use `slime` directly.
+
+Set `colocate: true` to place actor and rollout engines on the same physical
+GPUs. If their counts are omitted, both default to `num_gpus`; in disjoint mode
+they continue to default to an even split.
 
 The current migration intentionally uses synchronous SLIME training:
 rollout, training, evaluation and checkpoint commit happen in order. No async
