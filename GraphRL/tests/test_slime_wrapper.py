@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
+from importlib.machinery import ModuleSpec
 from pathlib import Path
 
 from graphrl.adaptive.model import write_checkpoint_manifest
@@ -200,6 +203,75 @@ def test_megatron_source_root_uses_explicit_build(tmp_path, monkeypatch):
     assert launcher_module._megatron_source_root() == build.resolve()
 
 
+def test_megatron_source_root_uses_packaged_runtime(tmp_path, monkeypatch):
+    site_packages = tmp_path / "site-packages"
+    training = site_packages / "megatron" / "training"
+    training.mkdir(parents=True)
+    module_spec = ModuleSpec("megatron.training", loader=None, is_package=True)
+    module_spec.submodule_search_locations = [str(training)]
+    monkeypatch.delenv("VAGEN_SLIME_MEGATRON_ROOT", raising=False)
+    monkeypatch.setattr(launcher_module, "VAGEN_SLIME_ROOT", tmp_path / "missing")
+    monkeypatch.setattr(
+        launcher_module.importlib.util,
+        "find_spec",
+        lambda name: module_spec if name == "megatron.training" else None,
+    )
+
+    assert launcher_module._megatron_source_root() == site_packages.resolve()
+
+
+def test_model_type_uses_hf_metadata_for_snapshot_directory(tmp_path, monkeypatch):
+    snapshot = tmp_path / "cc594898137f460bfe9f0759e9844b3ce807cfb5"
+    snapshot.mkdir()
+    (snapshot / "config.json").write_text(
+        json.dumps({"_name_or_path": "Qwen/Qwen2.5-VL-7B-Instruct"}),
+        encoding="utf-8",
+    )
+    models = tmp_path / "slime" / "scripts" / "models"
+    models.mkdir(parents=True)
+    (models / "qwen2.5-7B.sh").write_text("", encoding="utf-8")
+    monkeypatch.setattr(launcher_module, "VAGEN_SLIME_ROOT", tmp_path)
+
+    assert launcher_module._model_type(str(snapshot), None) == "qwen2.5-7B"
+
+
+def test_launch_prefers_relocated_cli_shim_before_interpreter_bin(tmp_path, monkeypatch):
+    shim_dir = tmp_path / "shims"
+    shim_dir.mkdir()
+    monkeypatch.setenv("GRAPHRL_CLI_SHIM_DIR", str(shim_dir))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setattr(launcher_module, "_model_type", lambda *args: "qwen2.5-7B")
+    monkeypatch.setattr(launcher_module, "build_train_args", lambda spec: ["--help"])
+    monkeypatch.setattr(launcher_module, "_resolve_model_path", lambda path: path)
+    monkeypatch.setattr(launcher_module, "_megatron_source_root", lambda: tmp_path)
+    monkeypatch.setattr(launcher_module, "execute_train", lambda **kwargs: None)
+
+    wrapper = _wrapper(tmp_path)
+    launcher_module.launch(wrapper.launch_spec())
+
+    path_parts = os.environ["PATH"].split(os.pathsep)
+    assert path_parts[0] == str(shim_dir)
+    assert path_parts[1] == str(Path(sys.executable).resolve().parent)
+
+
+def test_launch_forwards_explicit_slime_host_ip_to_ray_runtime(tmp_path, monkeypatch):
+    captured = {}
+    monkeypatch.setenv("SLIME_HOST_IP", "127.0.0.1")
+    monkeypatch.setattr(launcher_module, "_model_type", lambda *args: "qwen2.5-7B")
+    monkeypatch.setattr(launcher_module, "build_train_args", lambda spec: ["--help"])
+    monkeypatch.setattr(launcher_module, "_resolve_model_path", lambda path: path)
+    monkeypatch.setattr(launcher_module, "_megatron_source_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        launcher_module,
+        "execute_train",
+        lambda **kwargs: captured.update(kwargs),
+    )
+
+    launcher_module.launch(_wrapper(tmp_path).launch_spec())
+
+    assert captured["extra_env_vars"]["SLIME_HOST_IP"] == "127.0.0.1"
+
+
 def test_launch_spec_preserves_zero_rollout_eval_only_mode(tmp_path):
     envs = tmp_path / "envs.yaml"
     envs.write_text("envs: []\n", encoding="utf-8")
@@ -219,3 +291,80 @@ def test_launch_spec_preserves_zero_rollout_eval_only_mode(tmp_path):
     )
 
     assert spec.num_rollout == 0
+
+
+def test_colocate_uses_all_physical_gpus_for_actor_and_rollout(tmp_path, monkeypatch):
+    monkeypatch.setenv("WANDB_MODE", "disabled")
+    monkeypatch.setattr(launcher_module, "build_rows", lambda *args, **kwargs: [])
+    envs = tmp_path / "envs.yaml"
+    envs.write_text("envs: []\n", encoding="utf-8")
+    spec = build_launch_spec(
+        {
+            "training_steps": 1,
+            "slime": {
+                "train_envs": str(envs),
+                "eval_envs": str(envs),
+                "num_gpus": 8,
+                "colocate": True,
+            },
+        },
+        model_path="Qwen/Qwen2.5-VL-3B-Instruct",
+        output_dir=tmp_path / "run",
+    )
+
+    assert spec.actor_gpus == 8
+    assert spec.rollout_gpus == 8
+    assert spec.colocate is True
+    args = launcher_module.build_train_args(spec)
+    assert "--colocate" in args
+    assert args[args.index("--actor-num-gpus-per-node") + 1] == "8"
+    assert args[args.index("--rollout-num-gpus") + 1] == "8"
+    assert args[args.index("--num-gpus-per-node") + 1] == "8"
+
+
+def test_cuda_graph_can_be_disabled_for_multi_engine_startup(tmp_path, monkeypatch):
+    monkeypatch.setenv("WANDB_MODE", "disabled")
+    monkeypatch.setattr(launcher_module, "build_rows", lambda *args, **kwargs: [])
+    envs = tmp_path / "envs.yaml"
+    envs.write_text("envs: []\n", encoding="utf-8")
+    spec = build_launch_spec(
+        {
+            "training_steps": 1,
+            "slime": {
+                "train_envs": str(envs),
+                "eval_envs": str(envs),
+                "num_gpus": 8,
+                "colocate": True,
+                "sglang_disable_cuda_graph": True,
+            },
+        },
+        model_path="Qwen/Qwen2.5-VL-3B-Instruct",
+        output_dir=tmp_path / "run",
+    )
+
+    assert spec.sglang_disable_cuda_graph is True
+    assert "--sglang-disable-cuda-graph" in launcher_module.build_train_args(spec)
+
+
+def test_non_colocate_rejects_oversubscribed_gpu_counts(tmp_path):
+    envs = tmp_path / "envs.yaml"
+    envs.write_text("envs: []\n", encoding="utf-8")
+
+    try:
+        build_launch_spec(
+            {
+                "slime": {
+                    "train_envs": str(envs),
+                    "eval_envs": str(envs),
+                    "num_gpus": 8,
+                    "actor_gpus": 8,
+                    "rollout_gpus": 8,
+                },
+            },
+            model_path="Qwen/Qwen2.5-VL-3B-Instruct",
+            output_dir=tmp_path / "run",
+        )
+    except ValueError as error:
+        assert "disjoint" in str(error)
+    else:
+        raise AssertionError("expected oversubscribed disjoint placement to fail")

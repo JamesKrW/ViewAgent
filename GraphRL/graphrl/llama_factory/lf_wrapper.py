@@ -108,7 +108,7 @@ class LFWrapper:
         )
         self._log(f"Config generated at {sft_config_path}")
 
-        cmd = ["llamafactory-cli", "train", str(sft_config_path)]
+        cmd = _llamafactory_cli_command("train", sft_config_path)
 
         project_name = self.config.get("_project_name", "graphrl")
         experiment_name = self.config.get("_experiment_name", "graphrl_pipeline")
@@ -117,6 +117,7 @@ class LFWrapper:
             (project_name, experiment_name, str(iteration), "sft", str(model_dir.resolve()))
         )
         env = {**os.environ, "PYTHONUNBUFFERED": "1", "WANDB_PROJECT": project_name}
+        _ensure_torchrun_on_path(env)
         if env.get("WANDB_MODE", "online") != "disabled":
             env.setdefault("WANDB_RUN_ID", hashlib.sha256(identity.encode()).hexdigest()[:16])
             env.setdefault("WANDB_RESUME", "allow")
@@ -300,7 +301,7 @@ class LFWrapper:
             template=template,
         )
 
-        cmd = ["llamafactory-cli", "export", str(merge_config_path)]
+        cmd = _llamafactory_cli_command("export", merge_config_path)
         llama_factory_dir = self.config.get("llama_factory_dir")
         cwd = str(Path(llama_factory_dir).expanduser()) if llama_factory_dir else None
 
@@ -432,6 +433,41 @@ def _patch_text_model_type(config_path: Path) -> None:
             logger.info("[SFT] Patched text_config.model_type: qwen2_5_vl_text -> qwen2_5_vl")
     except Exception as e:
         logger.warning("[SFT] Failed to patch model config: %s", e)
+
+
+def _llamafactory_cli_command(action: str, config_path: Path) -> list[str]:
+    """Build an LF command even when the optional console script is absent.
+
+    Packable environments intentionally omit editable-install entry points in
+    some deployments.  The package remains importable through ``PYTHONPATH``,
+    so use its module entry point with the current interpreter as the portable
+    fallback.  This also keeps local smoke tests and cluster launches equivalent.
+    """
+    executable = shutil.which("llamafactory-cli")
+    if executable:
+        return [executable, action, str(config_path)]
+    logger.info(
+        "[SFT] llamafactory-cli is not installed; using %s -m llamafactory.cli",
+        sys.executable,
+    )
+    return [sys.executable, "-m", "llamafactory.cli", action, str(config_path)]
+
+
+def _ensure_torchrun_on_path(env: Dict[str, str]) -> None:
+    """Expose the current environment's torchrun when PATH was not activated.
+
+    Keep an existing entry point first: some schedulers deliberately install a
+    repaired torchrun shim whose shebang survives relocation of a packed conda
+    environment, and that shim must win over the interpreter's own.
+    """
+    if shutil.which("torchrun", path=env.get("PATH")):
+        return
+    python_bin = Path(sys.executable).parent
+    if not (python_bin / "torchrun").is_file():
+        return
+    old_path = env.get("PATH", "")
+    env["PATH"] = str(python_bin) + (os.pathsep + old_path if old_path else "")
+    logger.info("[SFT] Added current Python bin to PATH for torchrun: %s", python_bin)
 
 
 def _drop_llamafactory_readme(model_dir: Path) -> None:

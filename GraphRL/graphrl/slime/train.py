@@ -40,12 +40,25 @@ def _commit_checkpoint(args, rollout_id: int) -> None:
 
 def train(args):
     configure_logger()
+    release_train = args.release_train
     groups = create_placement_groups(args)
     init_tracking(args)
     rollout_manager, per_epoch = create_rollout_manager(args, groups["rollout"])
     actor, critic = create_training_models(args, groups, rollout_manager)
 
+    # create_rollout_manager() initially offloads colocated SGLang engines.
+    # Restore model storage before the CUDA-IPC weight copy, then restore the
+    # KV cache only after the copy has completed.  Writing into an offloaded
+    # model can segfault inside SGLang's default_weight_loader rather than
+    # raising a Python exception.
+    if args.offload_rollout and not release_train:
+        ray.get(rollout_manager.onload_weights.remote())
     actor.update_weights()
+    if args.check_weight_update_equal:
+        ray.get(rollout_manager.check_weights.remote(action="compare"))
+    if args.offload_rollout:
+        ray.get(rollout_manager.onload_kv.remote())
+
     # -1 is reserved for the pre-training baseline. The logging hook maps it to
     # step 0; completed rollout r maps to step r+1.
     if args.start_rollout_id == 0 and args.eval_interval is not None and not args.skip_eval_before_train:
@@ -57,8 +70,23 @@ def train(args):
         finish_tracking(args)
         return
 
+    def offload_train(actor_trains_this_step: bool) -> None:
+        # With --offload-train, each model offloads itself after train().
+        # Without it, release the model that occupied the GPU this step.
+        if not args.offload_train:
+            if not args.use_critic or actor_trains_this_step:
+                actor.clear_memory()
+            else:
+                critic.clear_memory()
+
     for rollout_id in range(args.start_rollout_id, args.num_rollout):
         rollout_data_ref = ray.get(rollout_manager.generate.remote(rollout_id))
+
+        if args.offload_rollout:
+            ray.get(rollout_manager.offload.remote())
+        if release_train:
+            actor.create()
+
         actor_trains = (not args.use_critic) or rollout_id >= args.num_critic_only_steps
         if args.use_critic:
             values = critic.async_train(rollout_id, rollout_data_ref)
@@ -69,23 +97,31 @@ def train(args):
         else:
             ray.get(actor.async_train(rollout_id, rollout_data_ref))
 
-        actor.clear_memory()
-        actor.update_weights()
-        if should_run_periodic_action(rollout_id, args.eval_interval, per_epoch, args.num_rollout):
-            ray.get(rollout_manager.eval.remote(rollout_id))
-
-        # Publish the checkpoint only after rollout export and same-step eval
-        # have both finished.  A tracker is therefore never ahead of the
-        # observable training/evaluation state after a crash.
-        if should_run_periodic_action(
+        periodic = should_run_periodic_action(
             rollout_id, args.save_interval, per_epoch, args.num_rollout
-        ):
+        )
+        if release_train or periodic:
             if actor_trains:
                 actor.save_model(rollout_id, force_sync=True)
             if args.use_critic:
                 critic.save_model(rollout_id, force_sync=True)
             if args.rollout_global_dataset:
                 ray.get(rollout_manager.save.remote(rollout_id))
+
+        offload_train(actor_trains)
+        if args.offload_rollout and not release_train:
+            ray.get(rollout_manager.onload_weights.remote())
+        actor.update_weights()
+        if args.offload_rollout:
+            ray.get(rollout_manager.onload_kv.remote())
+
+        if should_run_periodic_action(rollout_id, args.eval_interval, per_epoch, args.num_rollout):
+            ray.get(rollout_manager.eval.remote(rollout_id))
+
+        # Publish the checkpoint only after rollout export and same-step eval
+        # have both finished.  A tracker is therefore never ahead of the
+        # observable training/evaluation state after a crash.
+        if periodic:
             _commit_checkpoint(args, rollout_id)
 
     ray.get(rollout_manager.dispose.remote())

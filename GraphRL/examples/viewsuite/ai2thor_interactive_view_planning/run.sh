@@ -5,7 +5,7 @@
 # Prereqs:
 #   - VIEWSUITE_ROOT exported (repo root)
 #   - AI2-THOR HTTP render service running; its URL in
-#     $VIEWSUITE_ROOT/client_url_ai2thor.txt  (see scripts/ai2thor_http_service.sh)
+#     $VIEWSUITE_ROOT/client_url_ai2thor.txt  (see scripts/ai2thor/ai2thor_http_service.sh)
 #   - AI2-THOR IVP dataset generated + split into _train/_eval/_test under
 #     $VIEWSUITE_ROOT/data/ai2thor/
 #

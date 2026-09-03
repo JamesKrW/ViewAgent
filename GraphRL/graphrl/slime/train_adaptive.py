@@ -58,12 +58,21 @@ def _required_checkpoint_paths(args, rollout_id: int) -> tuple[Path, ...]:
 def train(args):
     configure_logger()
     schedule = _schedule()
+    release_train = args.release_train
     groups = create_placement_groups(args)
     init_tracking(args)
     rollout_manager, per_epoch = create_rollout_manager(args, groups["rollout"])
     actor, critic = create_training_models(args, groups, rollout_manager)
     schedule.reconcile_resume(args.save, args.start_rollout_id)
+
+    # Match SLIME's native synchronous colocate lifecycle. The rollout manager
+    # is initially offloaded by create_rollout_manager(); restore its weights,
+    # publish the actor weights, and only then restore KV/CUDA-graph memory.
+    if args.offload_rollout and not release_train:
+        ray.get(rollout_manager.onload_weights.remote())
     actor.update_weights()
+    if args.offload_rollout:
+        ray.get(rollout_manager.onload_kv.remote())
 
     if args.start_rollout_id == 0:
         ray.get(rollout_manager.eval.remote(rollout_id=-1))
@@ -76,6 +85,12 @@ def train(args):
 
     for rollout_id in range(args.start_rollout_id, args.num_rollout):
         rollout_data_ref = ray.get(rollout_manager.generate.remote(rollout_id))
+
+        if args.offload_rollout:
+            ray.get(rollout_manager.offload.remote())
+        if release_train:
+            actor.create()
+
         actor_trains = (not args.use_critic) or rollout_id >= args.num_critic_only_steps
         if args.use_critic:
             values = critic.async_train(rollout_id, rollout_data_ref)
@@ -86,11 +101,35 @@ def train(args):
         else:
             ray.get(actor.async_train(rollout_id, rollout_data_ref))
 
-        actor.clear_memory()
-        actor.update_weights()
+        periodic = should_run_periodic_action(
+            rollout_id, args.save_interval, per_epoch, args.num_rollout
+        )
         evaluate = should_run_periodic_action(
             rollout_id, args.eval_interval, per_epoch, args.num_rollout
         )
+        checkpoint_before_eval = release_train or periodic or evaluate
+        if checkpoint_before_eval:
+            if actor_trains:
+                actor.save_model(rollout_id, force_sync=True)
+            if args.use_critic:
+                critic.save_model(rollout_id, force_sync=True)
+            if args.rollout_global_dataset:
+                ray.get(rollout_manager.save.remote(rollout_id))
+
+        # With offload_train, SLIME actors offload themselves after train().
+        # Otherwise clear the model that occupied the GPU this step.
+        if not args.offload_train:
+            if not args.use_critic or actor_trains:
+                actor.clear_memory()
+            else:
+                critic.clear_memory()
+
+        if args.offload_rollout and not release_train:
+            ray.get(rollout_manager.onload_weights.remote())
+        actor.update_weights()
+        if args.offload_rollout:
+            ray.get(rollout_manager.onload_kv.remote())
+
         if evaluate:
             ray.get(rollout_manager.eval.remote(rollout_id))
 
@@ -98,16 +137,14 @@ def train(args):
         current = dict((state.get("rounds") or {}).get(str(schedule.round_index)) or {})
         is_best = int(current.get("best_step", -1)) == rollout_id + 1 and not current.get("checkpoint")
         terminal = schedule.decision() != DECISION_CONTINUE_RL
-        periodic = should_run_periodic_action(
-            rollout_id, args.save_interval, per_epoch, args.num_rollout
-        )
-        if periodic or is_best or terminal:
+        if (is_best or terminal) and not checkpoint_before_eval:
             if actor_trains:
                 actor.save_model(rollout_id, force_sync=True)
             if args.use_critic:
                 critic.save_model(rollout_id, force_sync=True)
             if args.rollout_global_dataset:
                 ray.get(rollout_manager.save.remote(rollout_id))
+        if periodic or is_best or terminal:
             hf_model = Path(args.save_hf.format(rollout_id=rollout_id))
             schedule.commit(
                 checkpoint_root=args.save,

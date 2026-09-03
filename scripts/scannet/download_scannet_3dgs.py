@@ -12,7 +12,7 @@ After download, handler's resolve_scene_gs_ply expects:
 
 Usage:
     export HF_TOKEN=hf_xxxx
-    python ViewSuite/scripts/download_scannet_3dgs.py \
+    python ViewSuite/scripts/scannet/download_scannet_3dgs.py \
         --manifest ViewSuite/view_suite/envs/scannet_proxy_task/data_gen/viewsuite_15k_gs_test_manifest.jsonl \
         --gs_root  /root/projects/viewsuite/data/scannet_3dgs_mcmc
 
@@ -30,11 +30,16 @@ from huggingface_hub import snapshot_download
 
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_MANIFEST = os.path.normpath(os.path.join(
-    _THIS_DIR, "..",
+# scripts/scannet/ -> repo root is two levels up. Prefer VIEWSUITE_ROOT when set so
+# this keeps working from a checkout mounted somewhere else.
+_REPO_ROOT = os.environ.get(
+    "VIEWSUITE_ROOT", os.path.normpath(os.path.join(_THIS_DIR, "..", "..")),
+)
+DEFAULT_MANIFEST = os.path.join(
+    _REPO_ROOT,
     "view_suite/envs/scannet_proxy_task/data_gen/viewsuite_15k_gs_test_manifest.jsonl",
-))
-DEFAULT_GS_ROOT = "/root/projects/viewsuite/data/scannet_3dgs_mcmc"
+)
+DEFAULT_GS_ROOT = os.path.join(_REPO_ROOT, "data/scannet_3dgs_mcmc")
 REPO_ID = "GaussianWorld/scannet_mcmc_1.5M_3dgs"
 
 

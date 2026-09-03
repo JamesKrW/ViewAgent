@@ -120,7 +120,7 @@ bash scripts/install_service.sh
 Lives on the render-service machine. Downloads from the public dataset repo [`MLL-Lab/viewsuite`](https://huggingface.co/datasets/MLL-Lab/viewsuite).
 
 ```bash
-bash scripts/download_scannet.sh
+bash scripts/scannet/download_scannet_service_data.sh
 # downloads scannet.tar.gz into data/
 ```
 
@@ -129,9 +129,14 @@ bash scripts/download_scannet.sh
 Lives on the training/eval machine (the one talking to the render service).
 
 ```bash
-bash scripts/download_viewsuite_all.sh
-# downloads viewsuite_15k.tar.gz + mindcube.tar.gz into data/
+bash scripts/scannet/download_scannet_client_open3d.sh   # viewsuite_15k.tar.gz
+bash scripts/mindcube/download_mindcube.sh               # mindcube.tar.gz
 ```
+
+The ScanNet tasks ship in three renderings — Open3D (above), Habitat, and 3DGS —
+as sibling directories under `data/`. Take whichever you are evaluating; they are
+the same tasks and splits. `scripts/download_all.sh scannet` grabs all of them
+plus the service meshes, which is ~50 GB.
 
 After both, you should have:
 
@@ -169,7 +174,7 @@ The service exposes an HTTP render endpoint that gym environments call to render
 export VIEWSUITE_ROOT="$(pwd)"
 
 #   args: MAX_WORKERS=32 GPU_IDS=0 OMP_CAP=1 PORT=8767 T=10800 BACKEND=open3d
-bash scripts/scannet_http_service_loop.sh 32 0 1 8767 10800 open3d
+bash scripts/scannet/scannet_http_service_loop.sh 32 0 1 8767 10800 open3d
 ```
 
 **3D-Gaussian-Splatting backend (gsplat, only test split available)** — renders from pretrained per-scene 3DGS reconstructions of the ScanNet scenes ([`GaussianWorld/scannet_mcmc_1.5M_3dgs`](https://huggingface.co/datasets/GaussianWorld/scannet_mcmc_1.5M_3dgs), from the [SceneSplat-7K](https://huggingface.co/datasets/GaussianWorld/scene_splat_7k) project). Download those first into `data/scannet_3dgs_mcmc/`:
@@ -177,14 +182,14 @@ bash scripts/scannet_http_service_loop.sh 32 0 1 8767 10800 open3d
 ```bash
 export VIEWSUITE_ROOT="$(pwd)"
 export HF_TOKEN=hf_xxx               # huggingface_hub token
-bash scripts/download_scannet_3dgs.sh
+bash scripts/scannet/download_scannet_service_3dgs.sh
 ```
 
 Then start the service with the gsplat backend (same args; `BACKEND` defaults to gsplat):
 
 ```bash
 export VIEWSUITE_ROOT="$(pwd)"
-bash scripts/scannet_http_service_loop_gs.sh 32 0 1 8767
+bash scripts/scannet/scannet_http_service_loop_gs.sh 32 0 1 8767
 ```
 
 The supervisor restarts the worker every `T` seconds (default 3h). Logs land under `./scannet_http_service_<TS>/`.
@@ -193,14 +198,14 @@ To run it in the background and persist its URL:
 
 ```bash
 export VIEWSUITE_ROOT="$(pwd)"
-nohup bash scripts/scannet_http_service_loop.sh 32 0 1 8767 \
+nohup bash scripts/scannet/scannet_http_service_loop.sh 32 0 1 8767 \
   > scannet_http_service_loop.log 2>&1 &
 echo "$!" > scannet_http_service_loop.pid
 echo "http://0.0.0.0:8767" > client_url.txt   # consumed by env configs
 # multiple services? separate URLs with ';' on one line (see "Scaling the render service")
 ```
 
-**Choosing `MAX_WORKERS`** (the first arg). Each worker keeps a ScanNet scene resident in GPU memory, so the worker count is bounded by **both GPU VRAM and CPU core count** (see [`scripts/scannet_http_service_loop.sh`](scripts/scannet_http_service_loop.sh)). `32` is a safe default for a 24–48 GB GPU on a ~32-core host. On a large card with many cores — e.g. an RTX 6000 Pro (Blackwell) on a 64-core box — try `64`. If you hit GPU OOM or CPU thrashing, lower it.
+**Choosing `MAX_WORKERS`** (the first arg). Each worker keeps a ScanNet scene resident in GPU memory, so the worker count is bounded by **both GPU VRAM and CPU core count** (see [`scripts/scannet/scannet_http_service_loop.sh`](scripts/scannet/scannet_http_service_loop.sh)). `32` is a safe default for a 24–48 GB GPU on a ~32-core host. On a large card with many cores — e.g. an RTX 6000 Pro (Blackwell) on a 64-core box — try `64`. If you hit GPU OOM or CPU thrashing, lower it.
 
 ---
 

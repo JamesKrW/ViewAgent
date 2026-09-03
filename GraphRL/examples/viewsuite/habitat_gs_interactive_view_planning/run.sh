@@ -5,7 +5,7 @@
 # Prereqs:
 #   - VIEWSUITE_ROOT exported (repo root)
 #   - Habitat-GS HTTP render service running; its URL in
-#     $VIEWSUITE_ROOT/client_url_habitat_gs.txt  (see scripts/habitat_gs_http_service.sh)
+#     $VIEWSUITE_ROOT/client_url_habitat_gs.txt  (see scripts/habitat_gs/habitat_gs_http_service_loop.sh)
 #   - Habitat-GS IVP dataset generated + split into _train/_eval/_test under
 #     $VIEWSUITE_ROOT/data/habitat_gs/
 #

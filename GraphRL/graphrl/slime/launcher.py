@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -54,6 +55,15 @@ def _megatron_source_root() -> Path:
     for candidate in candidates:
         if candidate is not None and (candidate / "megatron" / "training").is_dir():
             return candidate.resolve()
+    try:
+        installed = importlib.util.find_spec("megatron.training")
+    except (ImportError, ModuleNotFoundError):
+        installed = None
+    if installed is not None and installed.submodule_search_locations:
+        for location in installed.submodule_search_locations:
+            candidate = Path(location).resolve().parents[1]
+            if (candidate / "megatron" / "training").is_dir():
+                return candidate
     expected = VAGEN_SLIME_ROOT / "build" / "Megatron-LM"
     raise RuntimeError(
         "Megatron-LM is not built for the pinned VAGEN-SLIME checkout. Run "
@@ -65,15 +75,26 @@ def _megatron_source_root() -> Path:
 def _model_type(model_path: str, explicit: str | None) -> str:
     if explicit:
         return explicit
-    name = Path(model_path).name.lower().replace("-instruct", "").replace("-thinking", "")
-    match = re.search(r"qwen(2\.5|3|3\.5)-vl-(\d+(?:\.\d+)?b(?:-a\d+b)?)", name)
-    if match:
-        candidate = f"qwen{match.group(1)}-{match.group(2)}"
-        return _canonical_model_type(candidate)
-    match = re.search(r"qwen(2\.5|3|3\.5)-(\d+(?:\.\d+)?b(?:-a\d+b)?)", name)
-    if match:
-        candidate = f"qwen{match.group(1)}-{match.group(2)}"
-        return _canonical_model_type(candidate)
+    names = [Path(model_path).name]
+    try:
+        model_config = json.loads(
+            (Path(model_path) / "config.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        model_config = {}
+    for key in ("_name_or_path", "name_or_path"):
+        if model_config.get(key):
+            names.append(str(model_config[key]))
+    for raw_name in names:
+        name = raw_name.lower().replace("-instruct", "").replace("-thinking", "")
+        match = re.search(r"qwen(2\.5|3|3\.5)-vl-(\d+(?:\.\d+)?b(?:-a\d+b)?)", name)
+        if match:
+            candidate = f"qwen{match.group(1)}-{match.group(2)}"
+            return _canonical_model_type(candidate)
+        match = re.search(r"qwen(2\.5|3|3\.5)-(\d+(?:\.\d+)?b(?:-a\d+b)?)", name)
+        if match:
+            candidate = f"qwen{match.group(1)}-{match.group(2)}"
+            return _canonical_model_type(candidate)
     raise ValueError(
         f"cannot infer a SLIME MODEL_ARGS file from {model_path!r}; set "
         "general_overrides.rl.slime.megatron_model_type"
@@ -194,6 +215,7 @@ def _write_runtime_configs(spec: SlimeLaunchSpec) -> tuple[Path, Path, Path, Pat
     checkpoint_dir = root / "slime_checkpoints"
     roles = config_dir / "megatron_roles.yaml"
     actor_overrides = {"attention_backend": spec.megatron_attention_backend}
+    actor_overrides.update(spec.megatron_actor_overrides)
     critic_overrides = {
         "attention_backend": spec.megatron_attention_backend,
         "lr": spec.critic_lr,
@@ -290,7 +312,18 @@ def build_train_args(spec: SlimeLaunchSpec) -> list[str]:
         "--actor-num-nodes", "1",
         "--actor-num-gpus-per-node", str(spec.actor_gpus),
         "--rollout-num-gpus", str(spec.rollout_gpus),
+        "--num-gpus-per-node", str(spec.num_gpus),
     ]
+    if spec.colocate:
+        args.append("--colocate")
+    if spec.sglang_disable_cuda_graph:
+        args.append("--sglang-disable-cuda-graph")
+    if spec.over_sampling_batch_size is not None:
+        args.extend(("--over-sampling-batch-size", str(spec.over_sampling_batch_size)))
+    if spec.partial_rollout:
+        args.append("--partial-rollout")
+    if spec.mask_offpolicy_in_partial_rollout:
+        args.append("--mask-offpolicy-in-partial-rollout")
     if algorithm.needs_critic:
         args.extend(("--megatron-config-path", str(roles)))
     if algorithm.custom_advantage_path:
@@ -335,8 +368,14 @@ def launch(spec: SlimeLaunchSpec, *, dry_run: bool = False) -> None:
     if theta := _rope_theta(spec.model_path):
         os.environ["MODEL_ARGS_ROTARY_BASE"] = theta
     interpreter_bin = str(Path(sys.executable).resolve().parent)
-    if os.environ.get("PATH", "").split(os.pathsep)[0] != interpreter_bin:
-        os.environ["PATH"] = os.pathsep.join((interpreter_bin, os.environ.get("PATH", "")))
+    preferred_bins = (
+        os.environ.get("GRAPHRL_CLI_SHIM_DIR"),
+        interpreter_bin,
+    )
+    path_parts = [part for part in os.environ.get("PATH", "").split(os.pathsep) if part]
+    os.environ["PATH"] = os.pathsep.join(
+        dict.fromkeys(part for part in (*preferred_bins, *path_parts) if part)
+    )
     megatron_root = _megatron_source_root()
     wandb_env: dict[str, str] = {}
     if os.environ.get("WANDB_MODE", "online") != "disabled":
@@ -368,6 +407,22 @@ def launch(spec: SlimeLaunchSpec, *, dry_run: bool = False) -> None:
                     "VIEWSUITE_ROOT", "RENDER_TLS_NO_VERIFY", "SSL_CERT_FILE",
                     "WANDB_BASE_URL", "WANDB_ENTITY", "WANDB_PROJECT", "WANDB_MODE", "WANDB_DIR",
                     "GRAPHRL_ADAPTIVE_EXPERIMENT_DIR", "GRAPHRL_ADAPTIVE_ROUND",
+                    # Single-node schedulers may resolve the host to an address that
+                    # ambient HTTP proxies do not exclude.  Forward an explicit host
+                    # override into the Ray job so SGLang engines and its Rust router
+                    # can use loopback when the caller knows every actor is colocated.
+                    "SLIME_HOST_IP",
+                    # Colocate makes the memory saver re-back the whole training
+                    # reserved pool on every wake_up, so allocator fragmentation shows
+                    # up as a pool that ratchets across cycles (29 -> 45 GB measured at
+                    # TP=2) until cu_mem_create fails. expandable_segments targets that,
+                    # but it must be requested through SLIME's own flag: slime applies it
+                    # via torch's runtime allocator API *after* torch_memory_saver has
+                    # initialised (train_actor.py:57). Setting PYTORCH_CUDA_ALLOC_CONF
+                    # instead turns it on at process start, before the memory saver, and
+                    # torch_memory_saver then refuses to run at all.
+                    "SLIME_ENABLE_EXPANDABLE_SEGMENTS",
+                    "VAGEN_FRAME_FORMAT", "VAGEN_FRAME_QUALITY",
                 )
                 if os.environ.get(name)
             },

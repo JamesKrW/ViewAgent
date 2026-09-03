@@ -34,6 +34,6 @@ def resolve_scene_gs_ply(gs_root: str, scene_id: str) -> str:
     if not os.path.exists(path):
         raise FileNotFoundError(
             f"No 3DGS PLY found for scene {scene_id} at {path}. "
-            f"Did you run scripts/download_scannet_3dgs.sh?"
+            f"Did you run scripts/scannet/download_scannet_service_3dgs.sh?"
         )
     return path
