@@ -22,12 +22,16 @@ export VIEWSUITE_ROOT="${VIEWSUITE_ROOT:-${VIEWAGENT_ROOT}}"
 export PYTHONPATH="${VERL_ROOT}:${VAGEN_ROOT}:${VIEWAGENT_ROOT}:${GRAPHRL_ROOT}:${GRAPHRL_ROOT}/LLaMA-Factory/src${PYTHONPATH:+:${PYTHONPATH}}"
 
 if [ -z "${VAGEN_PYTHON:-}" ]; then
-    # Still conda_envs/slime: the interpreter is named for the backend it was
-    # first built for, but it is the env carrying vllm, ray and verl's deps.
-    LOCAL_PYTHON="${VIEWAGENT_ROOT}/../conda_envs/slime/bin/python"
+    # conda_envs/verl, built for this backend. Deliberately NOT conda_envs/slime:
+    # that one is the SLIME-era environment and the two cannot be merged --
+    # sglang 0.5.15 requires kernels>=0.14.1 while transformers[kernels] requires
+    # <0.13, so VAGEN's own `[sglang]` extra does not resolve as written. See
+    # GraphRL/README.md for the version set this env was built to.
+    LOCAL_PYTHON="${VIEWAGENT_ROOT}/../conda_envs/verl/bin/python"
     if [ -x "${LOCAL_PYTHON}" ]; then
         VAGEN_PYTHON="${LOCAL_PYTHON}"
     else
+        echo "conda_envs/verl not found. Build it first -- see GraphRL/README.md" >&2
         VAGEN_PYTHON="python"
     fi
 fi

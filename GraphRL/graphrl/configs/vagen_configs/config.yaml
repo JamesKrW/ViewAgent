@@ -83,6 +83,13 @@ hydra_overrides:
       # train, which is why gpu_memory_utilization is set low in the pipelines.
       # These are 143 GB cards; there is room for both.
       free_cache_engine: false
+      # sglang matches string stop conditions by decoding, so it needs the
+      # tokenizer. verl defaults this to True and VAGEN's dataset defaults
+      # stop_strings to ["</answer>"], which together give
+      #   ValueError: stop=['</answer>'] is unavailable when skip_tokenizer_init=True
+      # at the first generation. vLLM does not care, which is why the default is
+      # what it is.
+      skip_tokenizer_init: false
       engine_kwargs:
         sglang:
           # ...and do not build the memory saver in the first place.
