@@ -43,8 +43,22 @@ def required_rollout_prefix(
 ) -> int:
     """Return the rollout prefix needed to resume one adaptive checkpoint.
 
-    Every checkpoint must have the matching JSONL/commit marker even after the
-    success latch.  The latch disables image capture only; it does not disable
-    rollout accounting, W&B validation, or the durable JSONL audit trail.
+    Before the success threshold is latched, every trajectory may feed a later
+    TrajToSFT phase, so the checkpoint is only self-consistent when rollout data
+    is durable through the same step. Once latched, SFT is permanently disabled
+    for the run, so a complete rollout prefix is no longer part of resumability.
+
+    ★ The latch shortcut is load-bearing on the VAGEN/verl backend, not a
+    micro-optimisation. ``rollout_step_is_complete`` accepts a step on either of
+    two signals: a ``<step>.complete`` marker, or a non-empty ``image_<step>/``
+    directory. verl writes no marker -- that was SLIME's -- so frames are the only
+    signal, and the latch is precisely when the adaptive trainer stops writing
+    them. Without this branch the first post-latch checkpoint can never commit:
+
+        RuntimeError: regular checkpoint cannot commit before its rollout payload
+
+    which lands at the single most important moment of the experiment.
     """
+    if bool(state.get("latched")):
+        return 0
     return max(0, int(checkpoint_step))
