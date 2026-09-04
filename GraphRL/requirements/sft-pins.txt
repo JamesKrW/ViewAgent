@@ -1,0 +1,27 @@
+# Version constraints the SFT phase imposes, applied after VAGEN's stack lock.
+#
+#   bash GraphRL/VAGEN/scripts/install_sglang.sh      # the RL stack
+#   pip install -r GraphRL/requirements/sft-pins.txt  # then this
+#
+# Separate from VAGEN's lock on purpose. VAGEN trains; it never runs SFT. The SFT
+# phase is GraphRL's, through LLaMA-Factory, so its constraints are GraphRL's too --
+# and VAGEN's lock describing an RL-only stack is correct, not incomplete.
+#
+# LLaMA-Factory enforces these at import time, which means they surface hours into
+# an adaptive run: RL trains, TrajToSFT builds a dataset, and only then does the SFT
+# phase refuse to load. The reference RL deployment satisfies none of them and has
+# no reason to.
+#
+#   datasets  LLaMA-Factory requires <=4.0.0; the RL reference runs 5.0.0.
+#   trl       LLaMA-Factory requires >=0.18.0,<=0.24.0; the RL reference runs 0.9.6,
+#             below the floor. 0.24.0 still exports AutoModelForCausalLMWithValueHead,
+#             which verl's critic loads, and carries no stale numpy<2 bound.
+#
+# Not pinned here, and deliberately:
+#   torchao   sglang pins it to 0.9.0 exactly. peft 0.19 documents that its
+#             is_torchao_available() raises below 0.16, but that call is not on this
+#             path -- the full RL+SFT import chain loads clean on 0.9.0.
+
+datasets>=2.16.0,<=4.0.0
+trl>=0.18.0,<=0.24.0
+tensorboard          # verl declares it; without it every start warns
