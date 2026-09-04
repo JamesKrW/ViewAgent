@@ -51,7 +51,45 @@ class AdaptivePPOTrainer(VagenPPOTrainer):
 
     def _load_checkpoint(self):
         self._repair_adaptive_checkpoint_tracker()
-        return super()._load_checkpoint()
+        result = super()._load_checkpoint()
+        self._release_rollout_before_first_weight_sync()
+        return result
+
+    def _release_rollout_before_first_weight_sync(self) -> None:
+        """Put the rollout engines to sleep once, before ``fit`` syncs weights.
+
+        ``SeparateRayPPOTrainer.fit`` calls ``checkpoint_manager.update_weights``
+        immediately after ``_load_checkpoint`` and before anything has run a
+        rollout. With ``free_cache_engine`` on, that reaches
+        ``engine_workers._update_weights``, which unconditionally issues
+        ``rollout.resume(tags=["weights"])``. sglang implements resume as
+        ``self.offload_tags.remove(tag)``, and nothing has released yet, so the
+        set is empty:
+
+            KeyError: 'weights'   (sglang scheduler_update_weights_mixin.py:163)
+
+        The scheduler dies on that, and every rank then reports the same
+        second-order symptom -- "Failed to complete async request to
+        resume_memory_occupation after 3 attempts" -- which names neither the
+        tag nor the trainer. It looks like a broken memory saver, and was read
+        that way for several runs.
+
+        Every later step is already balanced: ``fit_step`` sleeps the replicas
+        right after generation, so the resume in ``_fit_update_weights`` has a
+        matching release. Only the first sync is unpaired.
+
+        ``verl/trainer/ppo/v1/trainer_base.py`` does exactly this -- sleeps the
+        replicas, then loads the checkpoint. ``experimental/separation`` omits
+        it. Done here rather than in verl so the backend stays unmodified; this
+        is also the natural seam, since the release has to land between the load
+        and the sync and ``_load_checkpoint`` is the only hook in between.
+        """
+        if not self.config.actor_rollout_ref.rollout.get("free_cache_engine", True):
+            return
+        manager = getattr(self, "checkpoint_manager", None)
+        if manager is None:
+            return
+        manager.sleep_replicas()
 
     def _repair_adaptive_checkpoint_tracker(self) -> None:
         """Point verl only at checkpoints carrying the matching controller state."""
