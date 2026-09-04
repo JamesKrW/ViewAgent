@@ -67,23 +67,25 @@ hydra_overrides:
       # at the first generation. vLLM does not care, which is why the default is
       # what it is.
       skip_tokenizer_init: false
-      # ★ Host-specific, not stack-specific. On the H200 box the colocated loop's
-      # release/resume around each weight sync drives sglang's torch_memory_saver
-      # over CUDA VMM and aborts the server:
+      # ★ The memory saver is deliberately NOT disabled here, and an earlier
+      # revision of this file that disabled it was wrong.
       #
-      #   CUDA error: invalid argument -> at::cuda::MemPool::~MemPool()
-      #   -> Fatal Python error: Aborted
+      # The reasoning that led there: sglang's resume failed on both hosts we run
+      # on -- `CUDA error: invalid argument` out of at::cuda::MemPool on the 141 GB
+      # H200, and `KeyError: 'weights'` from offload_tags.remove(tag) on the 80 GB
+      # cluster -- so the saver was switched off and gpu_memory_utilization dropped
+      # to buy the actor and critic room. That trade does not close: with the engine
+      # holding its reservation for the whole iteration, 80 GB cannot fit rollout
+      # plus a 7B actor plus a 7B critic, and every reduction just moved the OOM
+      # (actor backward -> critic_train_mini_batch) without ever fitting.
       #
-      # reaching the trainer only as "Failed to complete async request to
-      # resume_memory_occupation after 3 attempts". It reproduces on the verified
-      # A100 version set too, so it is the machine and not the pins -- the
-      # reference deployment is A100-80GB and does not hit it.
+      # What settles it is the configuration this experiment originally ran under
+      # (see git show db41f56^ of any IVP pipeline.yaml): sglang, memory saver on,
+      # gpu_memory_utilization 0.6, on this same 8x80 GB hardware. The saver is not
+      # broken on this stack -- it was being enabled without the rest of that
+      # rollout block, in particular `mode: async` and the two sglang attention
+      # backends the pipelines now restore.
       #
-      # sglang_rollout.py gates the calls on free_cache_engine; the engine builds
-      # the pool regardless, so enable_memory_saver has to go too. That one is
-      # reachable without patching verl only because async_sglang_server.py
-      # spreads **engine_kwargs last, after its hardcoded True.
-      free_cache_engine: false
-      engine_kwargs:
-        sglang:
-          enable_memory_saver: false
+      # So: no free_cache_engine override and no enable_memory_saver override. Both
+      # stay at their defaults (True), the engine releases its pool for the training
+      # phase, and the pipelines carry the original 0.6.

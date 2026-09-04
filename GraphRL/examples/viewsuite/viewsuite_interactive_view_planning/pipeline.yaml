@@ -49,7 +49,7 @@ general_overrides:
       actor_rollout_ref:
         actor:
           ppo_mini_batch_size: 128
-          ppo_micro_batch_size_per_gpu: 2
+          # Micro batch sizes are left to VAGEN's baseline_vllm.flags (all 1).
           checkpoint:
             # CheckpointMonitor promotes <ckpt>/actor/huggingface into rl_model/,
             # and that directory only exists when hf_model is among the contents.
@@ -57,22 +57,26 @@ general_overrides:
         rollout:
           n: 1
           tensor_model_parallel_size: 1
-          # Low: free_cache_engine is off on this host (see
-          # vagen_configs/config.yaml), so the engine holds this for the
-          # whole iteration, not just during rollout.
-          gpu_memory_utilization: 0.4
+          # The value this experiment originally ran under on 8x80 GB. It is only
+          # affordable because the memory saver is on (see vagen_configs/config.yaml):
+          # sglang hands the reservation back for the training phase, so it is not
+          # subtracted from the actor+critic budget.
+          gpu_memory_utilization: 0.6
           max_num_batched_tokens: 32768
           enforce_eager: true
-          enable_chunked_prefill: true
-          log_prob_micro_batch_size_per_gpu: 2
-        ref:
-          log_prob_micro_batch_size_per_gpu: 2
+          # ★ The rest of the original rollout block, restored together with the
+          # memory saver. Enabling the saver without these is what produced the
+          # KeyError: 'weights' that was previously read as the saver being broken.
+          mode: async
+          engine_kwargs:
+            sglang:
+              attention_backend: flashinfer
+              mm_attention_backend: triton_attn
       critic:
         # Deliberately not in baseline_vllm.flags: `need_critic` short-circuits on
         # it, so setting it there would build and train a critic for the GRPO
         # scripts too. A PPO experiment sets it itself.
         enable: true
-        ppo_micro_batch_size_per_gpu: 2
       trainer:
         harness: concat
         n_gpus_per_node: 8
