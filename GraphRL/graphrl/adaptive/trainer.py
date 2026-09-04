@@ -51,9 +51,8 @@ class AdaptivePPOTrainer(VagenPPOTrainer):
 
     def _load_checkpoint(self):
         self._repair_adaptive_checkpoint_tracker()
-        result = super()._load_checkpoint()
         self._release_rollout_before_first_weight_sync()
-        return result
+        return super()._load_checkpoint()
 
     def _release_rollout_before_first_weight_sync(self) -> None:
         """Put the rollout engines to sleep once, before ``fit`` syncs weights.
@@ -76,13 +75,25 @@ class AdaptivePPOTrainer(VagenPPOTrainer):
 
         Every later step is already balanced: ``fit_step`` sleeps the replicas
         right after generation, so the resume in ``_fit_update_weights`` has a
-        matching release. Only the first sync is unpaired.
+        matching release. Only the first sync is unpaired, and it is unpaired on
+        a fresh run too -- restoring a checkpoint makes it easier to hit, but the
+        ordering is wrong either way.
 
-        ``verl/trainer/ppo/v1/trainer_base.py`` does exactly this -- sleeps the
-        replicas, then loads the checkpoint. ``experimental/separation`` omits
-        it. Done here rather than in verl so the backend stays unmodified; this
-        is also the natural seam, since the release has to land between the load
-        and the sync and ``_load_checkpoint`` is the only hook in between.
+        Runs before ``super()._load_checkpoint()`` rather than after, matching
+        ``verl/trainer/ppo/v1/trainer_base.py``, whose "sleep all replicas to
+        load checkpoint" is doing two jobs: pairing the release, and freeing the
+        engine's reservation while the checkpoint is read. ``experimental/
+        separation`` omits the call entirely.
+
+        This belongs in ``SeparateRayPPOTrainer`` itself, and the fix upstream
+        would be to order its startup sleep -> load -> update_weights. It sits
+        here because ViewAgent keeps verl and VAGEN unmodified; ``_load_checkpoint``
+        is the only hook between worker init and the first sync.
+
+        Nothing about this is specific to the adaptive schedule, and any run with
+        ``free_cache_engine`` on hits it -- configurations that set it to False
+        merely skip both the resume and this release, so they never exercise the
+        sleep/resume state machine at all.
         """
         if not self.config.actor_rollout_ref.rollout.get("free_cache_engine", True):
             return
