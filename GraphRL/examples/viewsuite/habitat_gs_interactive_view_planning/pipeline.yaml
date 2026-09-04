@@ -73,7 +73,15 @@ general_overrides:
           mode: async
           engine_kwargs:
             sglang:
-              attention_backend: flashinfer
+              # The original block named flashinfer. It cannot be used here: the
+              # packaged conda env ships no CUDA headers, so flashinfer's JIT dies
+              # compiling its prefill kernel --
+              #   cutlass/util/reference/device/tensor_fill.h:52:10:
+              #   fatal error: curand_kernel.h: No such file or directory
+              # taking the sglang scheduler with it. triton needs no nvcc at run
+              # time and matches the mm backend already in use. Nothing about the
+              # memory saver depends on this choice.
+              attention_backend: triton
               mm_attention_backend: triton_attn
       critic:
         # Deliberately not in baseline_vllm.flags: `need_critic` short-circuits on
