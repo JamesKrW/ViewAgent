@@ -61,8 +61,8 @@ general_overrides:
         rollout:
           n: 1
           tensor_model_parallel_size: 1
-          # The value this experiment originally ran under on 8x80 GB. It is only
-          # affordable because the memory saver is on (see vagen_configs/config.yaml):
+          # The value this experiment originally ran under. It is only affordable
+          # because the memory saver is on (see vagen_configs/config.yaml):
           # sglang hands the reservation back for the training phase, so it is not
           # subtracted from the actor+critic budget.
           gpu_memory_utilization: 0.6

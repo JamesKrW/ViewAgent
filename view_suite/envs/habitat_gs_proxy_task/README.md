@@ -210,7 +210,8 @@ ScanNet backend) cannot share an interpreter. See `../../habitat_gs/habitat_gs_r
 for the build, and run `view_suite/habitat_gs/tests/sanity_render.py` on any new machine
 **before** anything else: a stage that fails to load still returns frames.
 
-Measured, 8×H200, 512×512, otherwise idle:
+Measured on 8 GPUs, 512×512, otherwise idle (absolute numbers are
+host-dependent; the ratios are what transfer):
 
 | | |
 |---|---|

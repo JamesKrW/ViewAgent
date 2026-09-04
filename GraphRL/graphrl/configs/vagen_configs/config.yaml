@@ -71,20 +71,20 @@ hydra_overrides:
       # revision of this file that disabled it was wrong.
       #
       # The reasoning that led there: sglang's resume failed on both hosts we run
-      # on -- `CUDA error: invalid argument` out of at::cuda::MemPool on the 141 GB
-      # H200, and `KeyError: 'weights'` from offload_tags.remove(tag) on the 80 GB
-      # cluster -- so the saver was switched off and gpu_memory_utilization dropped
-      # to buy the actor and critic room. That trade does not close: with the engine
-      # holding its reservation for the whole iteration, 80 GB cannot fit rollout
-      # plus a 7B actor plus a 7B critic, and every reduction just moved the OOM
-      # (actor backward -> critic_train_mini_batch) without ever fitting.
+      # on -- `CUDA error: invalid argument` out of at::cuda::MemPool on one,
+      # `KeyError: 'weights'` from offload_tags.remove(tag) on the other -- so the
+      # saver was switched off and gpu_memory_utilization dropped to buy the actor
+      # and critic room. That trade does not close: with the engine holding its
+      # reservation for the whole iteration, a card sized for rollout plus a 7B
+      # actor plus a 7B critic does not exist here, and every reduction just moved
+      # the OOM (actor backward -> critic_train_mini_batch) without ever fitting.
       #
       # What settles it is the configuration this experiment originally ran under
       # (see git show db41f56^ of any IVP pipeline.yaml): sglang, memory saver on,
-      # gpu_memory_utilization 0.6, on this same 8x80 GB hardware. The saver is not
-      # broken on this stack -- it was being enabled without the rest of that
-      # rollout block, in particular `mode: async` and the two sglang attention
-      # backends the pipelines now restore.
+      # gpu_memory_utilization 0.6, on the same hardware. The saver is not broken
+      # on this stack -- it was being enabled without the rest of that rollout
+      # block, in particular `mode: async` and the two sglang attention backends
+      # the pipelines now restore.
       #
       # So: no free_cache_engine override and no enable_memory_saver override. Both
       # stay at their defaults (True), the engine releases its pool for the training
