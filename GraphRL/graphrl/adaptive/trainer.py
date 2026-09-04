@@ -51,56 +51,7 @@ class AdaptivePPOTrainer(VagenPPOTrainer):
 
     def _load_checkpoint(self):
         self._repair_adaptive_checkpoint_tracker()
-        self._release_rollout_before_first_weight_sync()
         return super()._load_checkpoint()
-
-    def _release_rollout_before_first_weight_sync(self) -> None:
-        """Put the rollout engines to sleep once, before ``fit`` syncs weights.
-
-        ``SeparateRayPPOTrainer.fit`` calls ``checkpoint_manager.update_weights``
-        immediately after ``_load_checkpoint`` and before anything has run a
-        rollout. With ``free_cache_engine`` on, that reaches
-        ``engine_workers._update_weights``, which unconditionally issues
-        ``rollout.resume(tags=["weights"])``. sglang implements resume as
-        ``self.offload_tags.remove(tag)``, and nothing has released yet, so the
-        set is empty:
-
-            KeyError: 'weights'   (sglang scheduler_update_weights_mixin.py:163)
-
-        The scheduler dies on that, and every rank then reports the same
-        second-order symptom -- "Failed to complete async request to
-        resume_memory_occupation after 3 attempts" -- which names neither the
-        tag nor the trainer. It looks like a broken memory saver, and was read
-        that way for several runs.
-
-        Every later step is already balanced: ``fit_step`` sleeps the replicas
-        right after generation, so the resume in ``_fit_update_weights`` has a
-        matching release. Only the first sync is unpaired, and it is unpaired on
-        a fresh run too -- restoring a checkpoint makes it easier to hit, but the
-        ordering is wrong either way.
-
-        Runs before ``super()._load_checkpoint()`` rather than after, matching
-        ``verl/trainer/ppo/v1/trainer_base.py``, whose "sleep all replicas to
-        load checkpoint" is doing two jobs: pairing the release, and freeing the
-        engine's reservation while the checkpoint is read. ``experimental/
-        separation`` omits the call entirely.
-
-        This belongs in ``SeparateRayPPOTrainer`` itself, and the fix upstream
-        would be to order its startup sleep -> load -> update_weights. It sits
-        here because ViewAgent keeps verl and VAGEN unmodified; ``_load_checkpoint``
-        is the only hook between worker init and the first sync.
-
-        Nothing about this is specific to the adaptive schedule, and any run with
-        ``free_cache_engine`` on hits it -- configurations that set it to False
-        merely skip both the resume and this release, so they never exercise the
-        sleep/resume state machine at all.
-        """
-        if not self.config.actor_rollout_ref.rollout.get("free_cache_engine", True):
-            return
-        manager = getattr(self, "checkpoint_manager", None)
-        if manager is None:
-            return
-        manager.sleep_replicas()
 
     def _repair_adaptive_checkpoint_tracker(self) -> None:
         """Point verl only at checkpoints carrying the matching controller state."""
