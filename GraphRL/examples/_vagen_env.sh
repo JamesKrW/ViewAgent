@@ -33,7 +33,9 @@ if [ -z "${VAGEN_PYTHON:-}" ]; then
     if [ -x "${LOCAL_PYTHON}" ]; then
         VAGEN_PYTHON="${LOCAL_PYTHON}"
     else
-        echo "conda_envs/verl not found. Build it first -- see GraphRL/README.md" >&2
+        # Not an error everywhere: on the cluster the interpreter is the packaged
+        # conda env already on PATH, and there is no conda_envs/ tree at all.
+        echo "[_vagen_env] no local conda_envs/verl_sglang058; using python on PATH" >&2
         VAGEN_PYTHON="python"
     fi
 fi
