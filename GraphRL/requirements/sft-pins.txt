@@ -1,7 +1,19 @@
 # Version constraints the SFT phase imposes, applied after VAGEN's stack lock.
 #
-#   bash GraphRL/VAGEN/scripts/install_sglang.sh      # the RL stack
-#   pip install -r GraphRL/requirements/sft-pins.txt  # then this
+#   bash GraphRL/VAGEN/scripts/install_sglang.sh          # 1. the RL stack
+#   pip install -r GraphRL/requirements/sft-pins.txt      # 2. then this
+#   pip install --no-deps -r \
+#       GraphRL/VAGEN/requirements/locks/sglang-cu128-post.txt   # 3. AND re-apply this
+#
+# ★ Step 3 is not optional and not a typo. install_sglang.sh already applied that
+# file, but the packages here pull torch's dependency chain, and torch pins
+# nvidia-cudnn-cu12==9.10.2.21 -- which silently reverts the 9.16 override the post
+# file exists to make. SGLang then refuses to start on torch 2.9.x below cuDNN 9.15:
+#
+#     RuntimeError: CRITICAL WARNING: PyTorch 2.9.1 & CuDNN Compatibility Issue
+#
+# and it surfaces on the cluster, minutes into a job, not at install time. Any pip
+# install that touches a torch dependency has to be followed by the post file again.
 #
 # Separate from VAGEN's lock on purpose. VAGEN trains; it never runs SFT. The SFT
 # phase is GraphRL's, through LLaMA-Factory, so its constraints are GraphRL's too --
