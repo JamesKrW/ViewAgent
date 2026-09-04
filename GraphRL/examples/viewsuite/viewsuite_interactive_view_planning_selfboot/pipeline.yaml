@@ -53,7 +53,13 @@ general_overrides:
       actor_rollout_ref:
         actor:
           ppo_mini_batch_size: 128
-          # Micro batch sizes are left to VAGEN's baseline_vllm.flags (all 1).
+          # ★ 2, which is what this experiment originally ran under -- not the 1 in
+          # VAGEN's baseline_vllm.flags. An earlier revision deleted these overrides
+          # to survive an OOM, but that OOM came from the memory saver being off; with
+          # it back on, sglang returns its reservation for the training phase and 2
+          # fits. It matters: at 1 the four training phases (old_log_prob, values,
+          # update_critic, update_actor) were 64% of a 115 s step.
+          ppo_micro_batch_size_per_gpu: 2
           checkpoint:
             # CheckpointMonitor promotes <ckpt>/actor/huggingface into rl_model/,
             # and that directory only exists when hf_model is among the contents.
@@ -61,6 +67,7 @@ general_overrides:
         rollout:
           n: 1
           tensor_model_parallel_size: 1
+          log_prob_micro_batch_size_per_gpu: 2
           # The value this experiment originally ran under. It is only affordable
           # because the memory saver is on (see vagen_configs/config.yaml):
           # sglang hands the reservation back for the training phase, so it is not
@@ -84,7 +91,10 @@ general_overrides:
               # memory saver depends on this choice.
               attention_backend: triton
               mm_attention_backend: triton_attn
+        ref:
+          log_prob_micro_batch_size_per_gpu: 2
       critic:
+        ppo_micro_batch_size_per_gpu: 2
         # Deliberately not in baseline_vllm.flags: `need_critic` short-circuits on
         # it, so setting it there would build and train a critic for the GRPO
         # scripts too. A PPO experiment sets it itself.

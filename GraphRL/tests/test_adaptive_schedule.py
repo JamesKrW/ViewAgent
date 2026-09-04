@@ -20,6 +20,10 @@ from graphrl.adaptive.state import (
 from graphrl.vagen.adaptive_vagen_wrapper import AdaptiveVagenWrapper
 from graphrl.adaptive.trainer import AdaptivePPOTrainer
 from vagen.training.trainer.ppo_trainer import VagenPPOTrainer
+from graphrl.adaptive.rollouts import (
+    durable_rollout_prefix,
+    rollout_step_is_complete,
+)
 from graphrl.adaptive.schedule import AdaptiveSchedule
 
 METRIC = "val-aux/ae/traj_success/mean@1"
@@ -537,3 +541,28 @@ def test_tracker_accepts_latched_checkpoint_without_rollout_images(tmp_path):
 
     assert tracker.read_text(encoding="utf-8") == "20"
 
+
+
+def test_rollout_step_is_complete_on_jsonl_alone(tmp_path):
+    """verl writes no marker and no frames; the JSONL has to be the signal.
+
+    Requiring image_<step>/ kept durable_rollout_prefix at 0 and killed every run
+    at its first checkpoint.
+    """
+    (tmp_path / "1.jsonl").write_text('{"a": 1}\n', encoding="utf-8")
+    assert rollout_step_is_complete(tmp_path, 1)
+    assert durable_rollout_prefix(tmp_path) == 1
+
+
+def test_empty_jsonl_is_not_complete(tmp_path):
+    (tmp_path / "1.jsonl").write_text("", encoding="utf-8")
+    assert not rollout_step_is_complete(tmp_path, 1)
+
+
+def test_marker_still_overrides_where_one_exists(tmp_path):
+    """A SLIME-era directory keeps the stronger guarantee."""
+    (tmp_path / "1.jsonl").write_text('{"a": 1}\n', encoding="utf-8")
+    (tmp_path / "1.complete").write_text("partial", encoding="utf-8")
+    assert not rollout_step_is_complete(tmp_path, 1)
+    (tmp_path / "1.complete").write_text("complete", encoding="utf-8")
+    assert rollout_step_is_complete(tmp_path, 1)

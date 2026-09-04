@@ -268,16 +268,33 @@ def test_rebuilding_traj_output_invalidates_stale_sft_checkpoint(tmp_path):
     assert not sft_base.exists()
 
 
-def test_rollout_prefix_requires_json_and_images_for_every_step(tmp_path):
+def test_rollout_prefix_requires_json_for_every_step(tmp_path):
+    """The prefix stops at the first step with no payload, and frames are not it.
+
+    This used to require a non-empty image_<step>/ as well. verl only writes those
+    under trainer.log_image.enable, which nothing here sets, so the prefix never
+    advanced past 0 and the first checkpoint could not commit. Frames were never
+    the payload: TrajToSFT reads its images from the corpus directory.
+    """
     rollout_dir = tmp_path / "rollout_data"
+    rollout_dir.mkdir(parents=True)
     for step in (1, 2):
-        (rollout_dir / f"image_{step}" / "images_0").mkdir(parents=True)
         (rollout_dir / f"{step}.jsonl").write_text("{}\n", encoding="utf-8")
-        (rollout_dir / f"image_{step}" / "images_0" / "0.png").write_bytes(b"png")
 
     assert durable_rollout_prefix(rollout_dir) == 2
-    (rollout_dir / "image_2" / "images_0" / "0.png").unlink()
+    (rollout_dir / "2.jsonl").unlink()
     assert durable_rollout_prefix(rollout_dir) == 1
+
+
+def test_rollout_prefix_ignores_missing_frames(tmp_path):
+    """A step with frames and one without are both complete."""
+    rollout_dir = tmp_path / "rollout_data"
+    (rollout_dir / "image_1" / "images_0").mkdir(parents=True)
+    (rollout_dir / "image_1" / "images_0" / "0.png").write_bytes(b"png")
+    for step in (1, 2):
+        (rollout_dir / f"{step}.jsonl").write_text("{}\n", encoding="utf-8")
+
+    assert durable_rollout_prefix(rollout_dir) == 2
 
 
 def test_stale_rl_marker_is_not_authoritative_after_state_rollback(tmp_path):

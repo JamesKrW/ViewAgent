@@ -7,25 +7,40 @@ from typing import Any
 
 
 def rollout_step_is_complete(rollout_dir: str | Path, step: int) -> bool:
-    """Return whether one rollout step was atomically published.
+    """Return whether one rollout step was published in full.
 
-    New SLIME runs publish ``<step>.complete`` only after their JSONL and any
-    enabled images are durable.  Images are intentionally optional after the
-    adaptive latch, while JSONL remains available for diagnostics.  The image
-    check is retained as a fallback for older VAGEN experiment directories.
+    The payload is ``<step>.jsonl``: it carries the trajectories, and it is what
+    the later TrajToSFT phase reads. Frames are not part of it -- the view-graph
+    generators take their images from the corpus directory
+    (``traj_to_sft.viewsuite_15k_dir``), never from a rollout dump.
+
+    ★ A non-empty JSONL is the whole signal on the VAGEN/verl backend, and an
+    earlier revision that also demanded ``image_<step>/`` was wrong. That came
+    from SLIME, which published asynchronously and so wrote a ``<step>.complete``
+    marker once the JSONL and any enabled frames were durable. verl has no such
+    race: ``fit_step`` runs ``_fit_dump_data`` to completion before
+    ``_fit_save_checkpoint``, so the file is closed by the time anything asks. It
+    also never writes the marker, and it only writes frames when
+    ``trainer.log_image.enable`` is set -- which nothing here needs. Requiring
+    them meant ``durable_rollout_prefix`` stayed at 0 forever and every run died
+    at its first checkpoint:
+
+        RuntimeError: regular checkpoint cannot commit before its rollout
+        payload: checkpoint_step=20, required_rollout_step=20,
+        durable_rollout_step=0
+
+    The marker branch is kept, so a SLIME-era directory is still read with the
+    stronger guarantee where one exists.
     """
     root = Path(rollout_dir)
     jsonl = root / f"{int(step)}.jsonl"
-    images = root / f"image_{int(step)}"
     marker = root / f"{int(step)}.complete"
     try:
         if not jsonl.is_file() or jsonl.stat().st_size <= 0:
             return False
         if marker.is_file():
             return marker.read_text(encoding="utf-8").strip() == "complete"
-        if not images.is_dir():
-            return False
-        return any(path.is_file() and path.stat().st_size > 0 for path in images.rglob("*"))
+        return True
     except OSError:
         return False
 
@@ -48,16 +63,11 @@ def required_rollout_prefix(
     is durable through the same step. Once latched, SFT is permanently disabled
     for the run, so a complete rollout prefix is no longer part of resumability.
 
-    ★ The latch shortcut is load-bearing on the VAGEN/verl backend, not a
-    micro-optimisation. ``rollout_step_is_complete`` accepts a step on either of
-    two signals: a ``<step>.complete`` marker, or a non-empty ``image_<step>/``
-    directory. verl writes no marker -- that was SLIME's -- so frames are the only
-    signal, and the latch is precisely when the adaptive trainer stops writing
-    them. Without this branch the first post-latch checkpoint can never commit:
-
-        RuntimeError: regular checkpoint cannot commit before its rollout payload
-
-    which lands at the single most important moment of the experiment.
+    The latch shortcut is no longer load-bearing: ``rollout_step_is_complete``
+    now keys on the JSONL, which is written at every step whether or not frames
+    are. It stays because it still states the rule correctly -- once SFT is off
+    for good, no trajectory can reach it, so the prefix is not a resumability
+    condition at all -- and because it keeps the post-latch path cheap.
     """
     if bool(state.get("latched")):
         return 0
