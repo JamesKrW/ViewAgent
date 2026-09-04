@@ -69,7 +69,10 @@ def test_backend_horizon_is_remaining_global_budget_not_per_round_limit(tmp_path
     assert trainer["test_freq"] == 20
     assert trainer["save_freq"] == 20
     assert trainer["val_before_train"] is True
-    assert trainer["save_best_val"] is False
+    # save_best_actor on this backend; save_best_val was the previous name and is
+    # not a key the trainer accepts, so setting it fails the launch outright.
+    assert trainer["save_best_actor"] is False
+    assert "save_best_val" not in trainer
 
 
 def test_adaptive_command_uses_separate_trainer_entrypoint(tmp_path):
