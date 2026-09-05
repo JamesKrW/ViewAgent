@@ -19,28 +19,39 @@ envs:
       allow_rotate: false
       obs_format_bonus_reward: 0.01
 
-  - name: HabitatGSPath2View
-    data_source: path_to_view
-    seed: [0, 204, 1]
-    n_envs: 204
-    max_turns: 1
-    response_length_per_turn: 2048
-    config:
-      jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/habitat_gs/path_to_view_eval.jsonl
-      image_size: [256, 256]
-      format: eval_mode
-      format_reward: 0.0
-      answer_reward: 0.1
-
-  - name: HabitatGSView2Path
-    data_source: view_to_path
-    seed: [0, 204, 1]
-    n_envs: 204
-    max_turns: 1
-    response_length_per_turn: 2048
-    config:
-      jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/habitat_gs/view_to_path_eval.jsonl
-      image_size: [256, 256]
-      format: eval_mode
-      format_reward: 0.0
-      answer_reward: 0.1
+# ★ path_to_view and view_to_path are commented out, not deleted.
+#
+# Nothing trains on them -- the train split is IVP only -- so they were paying
+# two thirds of every validation to measure a policy no gradient ever reached.
+# Validation runs at test_freq (every 20 steps), so that is the dominant fixed
+# cost after rollout.
+#
+# Nothing downstream reads their metrics either: the adaptive controller keys on
+# val-aux/ae/traj_success/mean@1, and no pipeline references the other two.
+#
+# Uncomment both blocks to restore the full three-task eval.
+#   - name: HabitatGSPath2View
+#     data_source: path_to_view
+#     seed: [0, 204, 1]
+#     n_envs: 204
+#     max_turns: 1
+#     response_length_per_turn: 2048
+#     config:
+#       jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/habitat_gs/path_to_view_eval.jsonl
+#       image_size: [256, 256]
+#       format: eval_mode
+#       format_reward: 0.0
+#       answer_reward: 0.1
+#
+#   - name: HabitatGSView2Path
+#     data_source: view_to_path
+#     seed: [0, 204, 1]
+#     n_envs: 204
+#     max_turns: 1
+#     response_length_per_turn: 2048
+#     config:
+#       jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/habitat_gs/view_to_path_eval.jsonl
+#       image_size: [256, 256]
+#       format: eval_mode
+#       format_reward: 0.0
+#       answer_reward: 0.1
