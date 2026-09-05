@@ -86,6 +86,24 @@ hydra_overrides:
       # block, in particular `mode: async` and the two sglang attention backends
       # the pipelines now restore.
       #
-      # So: no free_cache_engine override and no enable_memory_saver override. Both
-      # stay at their defaults (True), the engine releases its pool for the training
-      # phase, and the pipelines carry the original 0.6.
+      # ★ free_cache_engine is set back to True here, against VAGEN's shared flags,
+      # which now carry:
+      #
+      #   # The legacy separated trainer performs its first weight sync before putting
+      #   # SGLang to sleep. Disabling cache offload avoids an invalid
+      #   # resume-before-sleep transition.
+      #   actor_rollout_ref.rollout.free_cache_engine=False
+      #
+      # That is the same defect this project hit, worked around from the other side.
+      # The fix is in the verl this VAGEN pins (aa4930f7): SeparateRayPPOTrainer's
+      # init_workers sleeps the replicas again, so the first sync has a matching
+      # release and there is no invalid transition left to avoid.
+      #
+      # Keeping the workaround would be actively harmful here. With cache offload off
+      # the engine holds its whole gpu_memory_utilization reservation for the entire
+      # iteration rather than just during rollout, which is what produced the OOM in
+      # the actor backward pass, then in critic_train_mini_batch, and finally in the
+      # checkpoint save. See the pipelines, which carry 0.6 on that assumption.
+      #
+      # enable_memory_saver stays at its default (True); nothing overrides it.
+      free_cache_engine: true

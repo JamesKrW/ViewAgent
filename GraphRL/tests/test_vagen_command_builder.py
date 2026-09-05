@@ -18,6 +18,9 @@ import pytest
 import yaml
 
 from graphrl.vagen.utils.command_builder import (
+    _BASELINE_FLAG_NAMES,
+)
+from graphrl.vagen.utils.command_builder import (
     _DEFAULT_HYDRA_CONFIG_DIR,
     build_vagen_command,
     build_vagen_env,
@@ -26,7 +29,10 @@ from graphrl.vagen.utils.command_builder import (
 )
 
 VAGEN_DIR = resolve_vagen_dir({})
-_HAVE_VAGEN = (VAGEN_DIR / "vagen" / "configs" / "baseline_vllm.flags").is_file()
+_HAVE_VAGEN = any(
+    (VAGEN_DIR / "vagen" / "configs" / name).is_file()
+    for name in _BASELINE_FLAG_NAMES
+)
 needs_vagen = pytest.mark.skipif(
     not _HAVE_VAGEN, reason="VAGEN submodule is not initialised"
 )
