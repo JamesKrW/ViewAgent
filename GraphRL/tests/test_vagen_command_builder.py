@@ -11,6 +11,7 @@ Run directly with::
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -132,6 +133,22 @@ def test_verl_precedes_the_installed_copy_on_pythonpath() -> None:
     assert parts[0] == str(resolve_verl_dir(VAGEN_DIR))
     # view_suite lives in the repo root, and the registry names classes from it.
     assert str(_DEFAULT_HYDRA_CONFIG_DIR.parents[3]) in parts
+
+
+@needs_vagen
+def test_child_tools_come_from_the_selected_python_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    python_bin = tmp_path / "training-env" / "bin"
+    monkeypatch.setattr(
+        "graphrl.vagen.utils.command_builder.sys.executable",
+        str(python_bin / "python"),
+    )
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin")
+
+    path = build_vagen_env({"vagen_dir": str(VAGEN_DIR)})["PATH"].split(os.pathsep)
+
+    assert path == [str(python_bin), "/usr/local/bin", "/usr/bin"]
 
 
 def test_relative_vagen_dir_anchors_to_the_repo_not_the_cwd() -> None:

@@ -94,11 +94,22 @@ def build_vagen_env(config: Dict[str, Any]) -> Dict[str, str]:
     inherited = os.environ.get("PYTHONPATH", "")
     if inherited:
         parts.extend(p for p in inherited.split(os.pathsep) if p)
+
+    # Launchers may select the training environment through an absolute Python
+    # path without activating that environment. Keep its console tools reachable
+    # as well: SGLang's JIT invokes ``ninja`` by name, and otherwise a fully
+    # installed environment fails only when the first multimodal kernel compiles.
+    python_bin = str(Path(sys.executable).parent)
+    inherited_path = os.environ.get("PATH", "")
+    path_parts = [python_bin]
+    if inherited_path:
+        path_parts.extend(p for p in inherited_path.split(os.pathsep) if p)
     # dict.fromkeys de-duplicates while keeping first-wins order
     return {
         **os.environ,
         "PYTHONUNBUFFERED": "1",
         "PYTHONPATH": os.pathsep.join(dict.fromkeys(parts)),
+        "PATH": os.pathsep.join(dict.fromkeys(path_parts)),
     }
 
 
