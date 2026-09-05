@@ -105,7 +105,7 @@ general_overrides:
 
   traj_to_sft:
     module: graphrl.envs.viewsuite.viewsuite_interactive_view_planning.InteractiveViewPlanningTrajToSFT
-    viewsuite_15k_dir: ${oc.env:VIEWSUITE_ROOT}/data/viewsuite_15k
+    viewsuite_15k_dir: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_scannet_open3d_ground_plane
     graph_builder:
       num_workers: 4
       filter:
@@ -120,8 +120,9 @@ general_overrides:
         # without the flag and trained for days on multi-action SFT data.
         enabled: true
         corpus: scannet
+        ground_plane_movement: true
         client_url: null       # null -> falls back to $VIEWSUITE_ROOT/client_url_2.txt
-        corpus_dir: null       # ScanNet's step is uniform; no per-scene table needed
+        corpus_dir: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_scannet_open3d_ground_plane
         step_translation: 0.5
         step_rotation: 30.0
         size: 256

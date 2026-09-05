@@ -189,6 +189,10 @@ class GymProxyTool(GymHabitatGSToolEnv):
             "pos_threshold_m": float(pos_thr_m),
             "ang_threshold_deg": float(ang_thr_deg),
             "jsonl_idx": idx,
+            "ground_plane_movement": self.ground_plane_movement,
+            "action_space_version": (
+                "ground_plane_v1" if self.ground_plane_movement else "legacy_v1"
+            ),
         }
 
     def _info_step(self, success: bool = False, error: Optional[str] = None) -> Dict[str, Any]:
@@ -347,6 +351,13 @@ class GymProxyTool(GymHabitatGSToolEnv):
         # camera, or the agent is told one step size, moves another, and chases a target
         # that was built with a third -- silently, with every render looking fine.
         _m = item.get("meta") or {}
+        declared_mode = _m.get("ground_plane_movement")
+        if declared_mode is not None and bool(declared_mode) != self.ground_plane_movement:
+            raise ValueError(
+                "Dataset/action-space mismatch: row declares "
+                f"ground_plane_movement={bool(declared_mode)}, but the environment "
+                f"is configured with ground_plane_movement={self.ground_plane_movement}."
+            )
         _step_t = _m.get("step_translation_m")
         _step_r = _m.get("step_rotation_deg")
         if _step_t is not None:

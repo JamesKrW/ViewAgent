@@ -4,12 +4,12 @@
 envs:
   - name: HabitatGSInteractiveViewPlanning
     data_source: ae
-    seed: [0, 1183, 1]
+    seed: [0, 1182, 1]
     n_envs: 1183
     max_turns: 10
     response_length_per_turn: 512
     config:
-      jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/habitat_gs/interactive_view_planning_train.jsonl
+      jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_habitat_gs_ground_plane/interactive_view_planning_train.jsonl
       image_size: [256, 256]
       format: eval_mode
       use_example_in_sys_prompt: false
@@ -21,6 +21,7 @@ envs:
       give_answer_reward: 0.1
       action_only_mode: true
       allow_rotate: false
+      ground_plane_movement: true
       # Per-turn bonus when the model emits the reasoning format
       # `<observation>...</observation> ... <action>...</action>`.
       obs_format_bonus_reward: 0.01

@@ -29,10 +29,8 @@ class GymScannetToolEnv(GymScannetRenderEnv):
     - The environment internally uses radians and extrinsic matrices, but you do not need to convert them.
 
     Supported actions (arguments are inside parentheses):
-    - move_forward : move forward on the ground plane by a fixed step (meters).
-    - move_backward: move backward on the ground plane by a fixed step (meters).
-    - move_right   : move right on the ground plane by a fixed step (meters).
-    - move_left    : move left on the ground plane by a fixed step (meters).
+    - move_forward / move_backward: move along the configured forward basis.
+    - move_right / move_left: strafe along the configured right basis.
     - move_up      : move up by a fixed step (meters).
     - move_down    : move down by a fixed step (meters).
     - turn_left    : yaw left by a fixed angle (degrees).
@@ -55,6 +53,9 @@ class GymScannetToolEnv(GymScannetRenderEnv):
         self.image_y_down = bool(env_config.get("image_y_down", True))
         self.action_only_mode = bool(env_config.get("action_only_mode", False))
         self.allow_rotate = bool(env_config.get("allow_rotate", True))
+        self.ground_plane_movement = bool(
+            env_config.get("ground_plane_movement", False)
+        )
         self.view_engine = ViewManipulator(
             step_translation=self.step_translation,
             step_rotation_deg=self.step_rotation_deg,
@@ -62,6 +63,7 @@ class GymScannetToolEnv(GymScannetRenderEnv):
             is_discrete=self.is_discrete,
             is_snap_every_step=self.is_snap_every_step,
             image_y_down=self.image_y_down,
+            ground_plane_movement=self.ground_plane_movement,
         )
 
     @cached_property
@@ -110,6 +112,25 @@ class GymScannetToolEnv(GymScannetRenderEnv):
                 instruction += (
                     "\n(Note: after every rotation, the Euler angles (rx, ry, rz) are "
                     "rounded to the nearest integer multiples of the rotation step along each axis.)\n"
+                )
+
+        if self.ground_plane_movement:
+            instruction += (
+                "\nGROUND-PLANE MOVEMENT\n"
+                "---------------------\n"
+                "- Forward/backward follow the camera heading projected onto the "
+                "horizontal XY plane; looking up/down does not change that direction.\n"
+                "- Left/right strafe perpendicular to that heading on the horizontal "
+                "XY plane.\n"
+                "- Up/down move only along world +Z/-Z.\n"
+                "- Turn left/right is yaw about world Z; look up/down is local pitch.\n"
+            )
+        else:
+            instruction += (
+                "\nCAMERA-LOCAL MOVEMENT (legacy)\n"
+                "------------------------------\n"
+                "- Translation follows the camera axes. After looking up/down, a "
+                "forward move can change both horizontal position and height.\n"
             )
 
         return instruction
@@ -188,13 +209,27 @@ class GymScannetToolEnv(GymScannetRenderEnv):
 
     @cached_property
     def action_description(self):
+        if self.ground_plane_movement:
+            forward = "move forward along the horizontal heading"
+            backward = "move backward along the horizontal heading"
+            right = "strafe right on the horizontal plane"
+            left = "strafe left on the horizontal plane"
+            up = "move along world +Z"
+            down = "move along world -Z"
+        else:
+            forward = "move along camera-local forward"
+            backward = "move along camera-local backward"
+            right = "move along camera-local right"
+            left = "move along camera-local left"
+            up = "move along camera-local screen-up"
+            down = "move along camera-local screen-down"
         return {
-            "move_forward": f"move forward on the ground plane by {self.step_translation} meters.",
-            "move_backward": f"move backward on the ground plane by {self.step_translation} meters.",
-            "move_right": f"move right on the ground plane by {self.step_translation} meters.",
-            "move_left": f"move left on the ground plane by {self.step_translation} meters.",
-            "move_up": f"move up by {self.step_translation} meters.",
-            "move_down": f"move down by {self.step_translation} meters.",
+            "move_forward": f"{forward} by {self.step_translation} meters.",
+            "move_backward": f"{backward} by {self.step_translation} meters.",
+            "move_right": f"{right} by {self.step_translation} meters.",
+            "move_left": f"{left} by {self.step_translation} meters.",
+            "move_up": f"{up} by {self.step_translation} meters.",
+            "move_down": f"{down} by {self.step_translation} meters.",
             "turn_left": f"yaw left by {self.step_rotation_deg} degrees.",
             "turn_right": f"yaw right by {self.step_rotation_deg} degrees.",
             "look_up": f"pitch up by {self.step_rotation_deg} degrees.",

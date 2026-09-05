@@ -93,6 +93,8 @@ class HabitatGSInteractiveViewPlanning(GymProxyTool):
         "s": "s",
         "a": "a",
         "d": "d",
+        "z": "y",
+        "x": "h",
         "arrow_left": "q",
         "arrow_right": "e",
         "arrow_up": "r",
@@ -104,6 +106,9 @@ class HabitatGSInteractiveViewPlanning(GymProxyTool):
         # space, regardless of the legacy GymProxyTool defaults.
         config = dict(env_config)
         config["action_only_mode"] = True
+        # This V2 task has always documented z/x as world-Y and horizontal body
+        # motion. Keep that behavior as its default while still exposing the knob.
+        config.setdefault("ground_plane_movement", True)
         config.setdefault("format", "eval_mode")
         config.setdefault("use_example_in_sys_prompt", False)
         super().__init__(config)
@@ -132,6 +137,11 @@ class HabitatGSInteractiveViewPlanning(GymProxyTool):
             self.format,
             action_example="w|arrow_left|d  OR  submit_pose(tx,ty,tz,rx,ry,rz)",
         )
+        vertical_rule = (
+            "- z / x: move vertically along world +Y / -Y; pitch has no effect."
+            if self.ground_plane_movement
+            else "- z / x: move along sensor-local up / down; this direction tilts with pitch."
+        )
         text = f"""
 You are controlling a camera in a Habitat-GS scene.
 
@@ -149,9 +159,10 @@ Every turn is self-contained. It contains:
    between them.
 
 NAVIGATION ACTIONS
-- w / s: move forward / backward on the horizontal plane.
-- a / d: strafe left / right on the horizontal plane.
-- z / x: move up / down along the world Y axis.
+- w / s: move forward / backward using yaw only on the horizontal XZ plane;
+  looking up/down never changes the movement direction or camera height.
+- a / d: strafe left / right, perpendicular to that heading on the XZ plane.
+{vertical_rule}
 - arrow_left / arrow_right: turn left / right (yaw).
 - arrow_up / arrow_down: look up / down (pitch).
 
@@ -404,12 +415,6 @@ OUTPUT FORMAT
         engine_action = self._ENGINE_ACTIONS.get(action)
         if engine_action is not None:
             self.view_engine.step(engine_action)
-            return
-        if action == "z":
-            self.view_engine.pos[1] += float(self.step_translation)
-            return
-        if action == "x":
-            self.view_engine.pos[1] -= float(self.step_translation)
             return
         raise ValueError(f"Unsupported navigation action: {action}")
 

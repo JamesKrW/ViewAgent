@@ -61,12 +61,14 @@ def run(
     pitch_limit_deg: float = 60.0,
     eye_height_m: float = 1.5,
     seed: int = 0,
+    ground_plane_movement: bool = False,
 ) -> None:
     root = root or default_root()
     scene_ids: List[str] = parse_subset(scenes, root=root)
     cfg_kwargs = dict(out_root=out_root, root=root, samples_per_scene=samples_per_scene,
                       width=width, height=height, fov=fov, seed=seed,
-                      pitch_limit_deg=pitch_limit_deg, eye_height_m=eye_height_m)
+                      pitch_limit_deg=pitch_limit_deg, eye_height_m=eye_height_m,
+                      ground_plane_movement=ground_plane_movement)
     os.makedirs(out_root, exist_ok=True)
 
     jobs = [(s, i % max(1, n_gpus), cfg_kwargs) for i, s in enumerate(scene_ids)]

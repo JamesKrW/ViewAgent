@@ -57,13 +57,14 @@ class _ScanNetAdapter:
     corpus = "scannet"
 
     @staticmethod
-    def manipulator(src_se3, step_t, step_r):
+    def manipulator(src_se3, step_t, step_r, ground_plane_movement=False):
         from view_suite.scannet.view_manipulator import ViewManipulator
         # Match gym_scannet_tool_env.
         vm = ViewManipulator(
             step_translation=step_t, step_rotation_deg=step_r,
             world_up_axis="Z", is_discrete=True,
             is_snap_every_step=True, image_y_down=True,
+            ground_plane_movement=ground_plane_movement,
         )
         vm.set_se3(np.asarray(src_se3, dtype=np.float64), degrees=True)
         return vm
@@ -97,10 +98,11 @@ class _HabitatGSAdapter(_ScanNetAdapter):
     corpus = "habitat_gs"
 
     @staticmethod
-    def manipulator(src_se3, step_t, step_r):
+    def manipulator(src_se3, step_t, step_r, ground_plane_movement=False):
         from view_suite.habitat_gs.view_manipulator import HabitatGSViewManipulator
         vm = HabitatGSViewManipulator(
-            step_translation=step_t, step_rotation_deg=step_r, discrete=True)
+            step_translation=step_t, step_rotation_deg=step_r, discrete=True,
+            ground_plane_movement=ground_plane_movement)
         vm.set_se3(np.asarray(src_se3, dtype=np.float64), degrees=True)
         return vm
 
@@ -123,15 +125,17 @@ class _Ai2ThorAdapter:
     corpus = "ai2thor"
 
     @staticmethod
-    def manipulator(src_se3, step_t, step_r):
+    def manipulator(src_se3, step_t, step_r, ground_plane_movement=False):
         from view_suite.ai2thor.view_manipulator import ViewManipulator
         from view_suite.ai2thor.pose_utils import c2w_to_unity_pose
-        # Unity pose dicts in and out; no se3 accessors.
+        # Initialize through Unity pose fields so this is bit-for-bit the same
+        # path used by AI2-THOR data generation.
         c2w = _se3_to_c2w(src_se3)
         vm = ViewManipulator(
             init_pose=c2w_to_unity_pose(c2w),
             step_translation=step_t, step_rotation_deg=step_r,
-            is_discrete=True)
+            is_discrete=True,
+            ground_plane_movement=ground_plane_movement)
         return vm
 
     @staticmethod
@@ -250,11 +254,16 @@ def _K3(K) -> List[List[float]]:
     return K.tolist()
 
 
-def _intermediate_chain(src_se3, actions, step_t, step_r, adapter):
+def _intermediate_chain(
+    src_se3, actions, step_t, step_r, adapter, ground_plane_movement=False
+):
     """Replay ``actions`` from ``src_se3``; return, for each intermediate pose
     (all but the last, which lands on the existing dst), ``(se3, c2w_4x4)``.
     Returns ``None`` if any action is not renderable (unknown code)."""
-    vm = adapter.manipulator(src_se3, step_t, step_r)
+    vm = adapter.manipulator(
+        src_se3, step_t, step_r,
+        ground_plane_movement=ground_plane_movement,
+    )
     out = []
     n = len(actions)
     for i, a in enumerate(actions):
@@ -342,7 +351,8 @@ def atomize_graph(builder, graph, images_dir, cfg: Dict[str, Any]) -> Dict[str, 
 
     cfg keys: corpus(scannet), client_url (required), scannet_root, client_origin,
     corpus_dir, step_translation(0.5), step_rotation(30.0), size(512),
-    render_chunk(32).
+    render_chunk(32), ground_plane_movement (False; True for Habitat-GS to
+    match its compact IVP runtime).
     """
     g = graph._g
     corpus = str(cfg.get("corpus", "scannet"))
@@ -352,6 +362,9 @@ def atomize_graph(builder, graph, images_dir, cfg: Dict[str, Any]) -> Dict[str, 
     adapter = _ADAPTERS[corpus]
     step_t = float(cfg.get("step_translation", 0.5))
     step_r = float(cfg.get("step_rotation", 30.0))
+    ground_plane_movement = bool(
+        cfg.get("ground_plane_movement", corpus == "habitat_gs")
+    )
     scene_steps = _scene_step_map(cfg.get("corpus_dir"))
     size = int(cfg.get("size", 512))
     chunk = int(cfg.get("render_chunk", 32))
@@ -364,9 +377,11 @@ def atomize_graph(builder, graph, images_dir, cfg: Dict[str, Any]) -> Dict[str, 
                          "or provide client_url_2.txt / client_url.txt in VIEWSUITE_ROOT)")
     images_dir = Path(images_dir)
     images_dir.mkdir(parents=True, exist_ok=True)
-    logger.info("[atomize] corpus=%s per-scene steps for %d scenes "
+    logger.info("[atomize] corpus=%s movement=%s per-scene steps for %d scenes "
                 "(global fallback %.2f m / %.1f deg)",
-                corpus, len(scene_steps), step_t, step_r)
+                corpus,
+                "ground_plane" if ground_plane_movement else "camera_local",
+                len(scene_steps), step_t, step_r)
 
     # ── 1) collect multi-action edges + compute intermediate poses ──
     # jobs: list of dict(u, v, eid, scene, actions, inter_se3, req_idx[list])
@@ -385,7 +400,10 @@ def atomize_graph(builder, graph, images_dir, cfg: Dict[str, Any]) -> Dict[str, 
             jobs.append({"u": u, "v": v, "eid": eid, "drop": True})
             continue
         s_t, s_r = scene_steps.get(scene, (step_t, step_r))
-        chain = _intermediate_chain(_pose_to_se3(pose), actions, s_t, s_r, adapter)
+        chain = _intermediate_chain(
+            _pose_to_se3(pose), actions, s_t, s_r, adapter,
+            ground_plane_movement=ground_plane_movement,
+        )
         if chain is None:
             jobs.append({"u": u, "v": v, "eid": eid, "drop": True})
             continue

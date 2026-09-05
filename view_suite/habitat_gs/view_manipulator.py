@@ -1,14 +1,4 @@
-"""Camera control for Habitat-GS, using Habitat's own action semantics.
-
-Deliberately NOT a copy of the ScanNet or AI2-THOR manipulator. The three envs do not
-agree on what an action means, and this one follows the simulator it runs on:
-
-| | ScanNet | AI2-THOR | here (Habitat-GS) |
-|---|---|---|---|
-| turn  | camera-local +Y (`R_c2w @ R_y`) — tilts once pitched | world +Y | world +Y |
-| pitch | camera-local X | camera-local X | camera-local X |
-| roll  | in the action set | in the action set | **absent** |
-| move  | full camera basis (pitch-coupled) | full camera basis | **horizontal** |
+"""Camera control for Habitat-GS, using Habitat's body/sensor pose model.
 
 Habitat gets the last two rows from structure rather than from special-casing: an agent
 is a *body* node with a *sensor* child (``habitat_sim/agent/controls/default_controls.py``).
@@ -22,9 +12,9 @@ the body origin, so the camera position *is* the body position:
 
     R_camera_gl = R_y(yaw) @ R_x(pitch)
 
-Default action set matches Habitat's (``agent.py::_default_action_space`` plus the
-strafe/look actions the proxy tasks need): no roll, and up/down are separate actions
-rather than a consequence of pitching and moving forward.
+Forward/strafe are always body-local and horizontal. ``ground_plane_movement`` selects
+whether up/down use strict world Y (the shared ``ground_plane_v1`` convention) or the
+native viewer's sensor-local Y. There is no roll action.
 """
 from __future__ import annotations
 
@@ -86,6 +76,7 @@ class HabitatGSViewManipulator:
         step_rotation_deg: float = 30.0,  # the proxy tasks' step, not Habitat's 10
         pitch_limit_deg: float = 60.0,
         discrete: bool = True,
+        ground_plane_movement: bool = False,
     ):
         self.pos = np.asarray(position, dtype=np.float64).copy()
         self.yaw = float(yaw_deg)
@@ -94,6 +85,7 @@ class HabitatGSViewManipulator:
         self.step_r = float(step_rotation_deg)
         self.pitch_limit = float(pitch_limit_deg)
         self.is_discrete = bool(discrete)
+        self.ground_plane_movement = bool(ground_plane_movement)
         if self.is_discrete:
             self._snap_angles()
 
@@ -225,9 +217,11 @@ class HabitatGSViewManipulator:
         self._snap_angles()
 
     def move_up(self, d: float) -> None:
-        # Habitat's MoveUp is sensor-local +Y, i.e. it tilts with pitch. Kept faithful
-        # even though the sampled action set does not use it.
-        self.pos += (self.rotation_gl() @ np.array([0.0, 1.0, 0.0])) * float(d)
+        if self.ground_plane_movement:
+            self.pos += np.array([0.0, 1.0, 0.0]) * float(d)
+        else:
+            # Native viewer MoveUp is sensor-local +Y, so it tilts with pitch.
+            self.pos += (self.rotation_gl() @ np.array([0.0, 1.0, 0.0])) * float(d)
 
     # ── unified step ─────────────────────────────────────────────────────────
     def step(self, action: str) -> Dict:

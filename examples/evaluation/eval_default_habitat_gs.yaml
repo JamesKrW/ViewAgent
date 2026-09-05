@@ -46,7 +46,7 @@ envs:
     split: test
     max_turns: 1
     config:
-      jsonl_path: ${fileroot}/data/viewagent15k_habitat_gs/path_to_view_test.jsonl
+      jsonl_path: ${fileroot}/data/viewagent15k_habitat_gs_ground_plane/path_to_view_test.jsonl
       image_size: [512, 512]
       format: eval_mode
       example_count: 0
@@ -58,7 +58,7 @@ envs:
     split: test
     max_turns: 1
     config:
-      jsonl_path: ${fileroot}/data/viewagent15k_habitat_gs/view_to_path_test.jsonl
+      jsonl_path: ${fileroot}/data/viewagent15k_habitat_gs_ground_plane/view_to_path_test.jsonl
       image_size: [512, 512]
       format: eval_mode
       example_count: 0
@@ -70,7 +70,7 @@ envs:
     split: test
     max_turns: 10
     config:
-      jsonl_path: ${fileroot}/data/viewagent15k_habitat_gs/interactive_view_planning_test.jsonl
+      jsonl_path: ${fileroot}/data/viewagent15k_habitat_gs_ground_plane/interactive_view_planning_test.jsonl
       max_turns: 10
       render_backend: client
       client_url_file_path: ${fileroot}/client_url_habitat_gs.txt
@@ -78,6 +78,8 @@ envs:
       format: eval_mode
       use_example_in_sys_prompt: false
       action_only_mode: true
+      allow_rotate: false
+      ground_plane_movement: true
 
 experiment:
   dump_dir: ${fileroot}/rollouts/baseline_v2

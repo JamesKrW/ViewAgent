@@ -34,6 +34,7 @@ def run(
     height: int = 512,
     fov: float = 90.0,
     seed: int = 0,
+    ground_plane_movement: bool = False,
     max_dominant_pixel_frac: float = 0.8,
     keep_shards: bool = False,
 ):
@@ -63,6 +64,7 @@ def run(
             f"--samples_per_scene={samples_per_scene}",
             f"--width={width}", f"--height={height}", f"--fov={fov}",
             f"--seed={seed}", f"--max_dominant_pixel_frac={max_dominant_pixel_frac}",
+            f"--ground_plane_movement={ground_plane_movement}",
             "--gpu_id=0",  # CUDA_VISIBLE_DEVICES already masks to this GPU
         ]
         log = open(os.path.join(out_root, f"_shard{gpu}.log"), "w")

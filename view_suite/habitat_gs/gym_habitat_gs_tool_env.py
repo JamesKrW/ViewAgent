@@ -32,11 +32,15 @@ class GymHabitatGSToolEnv(GymHabitatGSRenderEnv):
         self.is_discrete = bool(env_config.get("is_discrete", True))
         self.pitch_limit_deg = float(env_config.get("pitch_limit_deg", 60.0))
         self.action_only_mode = bool(env_config.get("action_only_mode", False))
+        self.ground_plane_movement = bool(
+            env_config.get("ground_plane_movement", False)
+        )
         self.view_engine = HabitatGSViewManipulator(
             step_translation=self.step_translation,
             step_rotation_deg=self.step_rotation_deg,
             pitch_limit_deg=self.pitch_limit_deg,
             discrete=self.is_discrete,
+            ground_plane_movement=self.ground_plane_movement,
         )
 
     # -------------------------
@@ -78,13 +82,17 @@ class GymHabitatGSToolEnv(GymHabitatGSRenderEnv):
         # "0.6501199473505435 meters" in a prompt is noise. The camera uses the exact
         # value, which differs by <5 mm against a 0.5 m success threshold.
         t, r = round(self.step_translation, 2), round(self.step_rotation_deg, 2)
+        vertical_up = ("move along world +Y" if self.ground_plane_movement
+                       else "move along sensor-local up")
+        vertical_down = ("move along world -Y" if self.ground_plane_movement
+                         else "move along sensor-local down")
         return {
             "move_forward":  f"move forward on the ground plane by {t} meters.",
             "move_backward": f"move backward on the ground plane by {t} meters.",
             "move_left":     f"strafe left on the ground plane by {t} meters.",
             "move_right":    f"strafe right on the ground plane by {t} meters.",
-            "move_up":       f"move the camera up by {t} meters.",
-            "move_down":     f"move the camera down by {t} meters.",
+            "move_up":       f"{vertical_up} by {t} meters.",
+            "move_down":     f"{vertical_down} by {t} meters.",
             "turn_left":     f"turn left by {r} degrees, about the vertical axis.",
             "turn_right":    f"turn right by {r} degrees, about the vertical axis.",
             "look_up":       f"tilt the camera up by {r} degrees "
@@ -146,6 +154,14 @@ class GymHabitatGSToolEnv(GymHabitatGSRenderEnv):
             "  affected by how far up or down the camera is tilted.\n"
             "- There is no roll action: the camera never rotates about its view axis.\n"
         )
+        if self.ground_plane_movement:
+            instruction += (
+                "- Up/down move strictly along world +Y/-Y, independent of pitch.\n"
+            )
+        else:
+            instruction += (
+                "- Up/down follow sensor-local up/down and therefore tilt with pitch.\n"
+            )
         if self.is_discrete:
             instruction += (
                 "\nDISCRETE MODE\n"

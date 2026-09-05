@@ -4,8 +4,8 @@ Adapted from view_suite.scannet.gym_scannet_tool_env.GymScannetToolEnv; only
 two things differ from the scannet version:
   1. Inherits from GymAi2thorRenderEnv (HTTP AI2-THOR service) instead of
      GymScannetRenderEnv (ScanNet mesh/3DGS service).
-  2. ViewManipulator is built with world_up_axis="Y" (AI2-THOR / Unity) instead
-     of "Z" (ScanNet).
+  2. It uses the same AI2-THOR ViewManipulator as data generation, including
+     Unity's Y-up pose convention.
 
 All action semantics, parsing, and descriptions are identical so that prompt
 templates, action vocabulary, and proxy-task grading code can be reused
@@ -19,11 +19,7 @@ from functools import cached_property
 from typing import Any, Dict, List, Optional, Tuple
 
 from view_suite.ai2thor.gym_ai2thor_render_env import GymAi2thorRenderEnv
-# Reuse the generic ViewManipulator from scannet (it supports both Y-up and
-# Z-up worlds via world_up_axis). The ai2thor/view_manipulator.py module is a
-# SEPARATE simpler helper used by pre-render / data_gen utilities; it has a
-# different method surface (get_pose_thor etc.) and is NOT what we need here.
-from view_suite.scannet.view_manipulator import ViewManipulator
+from view_suite.ai2thor.view_manipulator import ViewManipulator
 from view_suite.envs.utils.parse_utils import ParsedAction, FormatRegistry, parse_actions
 
 
@@ -44,13 +40,18 @@ class GymAi2thorToolEnv(GymAi2thorRenderEnv):
         self.is_snap_every_step = bool(env_config.get("is_snap_every_step", True))
         self.image_y_down = bool(env_config.get("image_y_down", True))
         self.action_only_mode = bool(env_config.get("action_only_mode", False))
+        self.ground_plane_movement = bool(
+            env_config.get("ground_plane_movement", False)
+        )
         self.view_engine = ViewManipulator(
+            init_pose=None,
             step_translation=self.step_translation,
             step_rotation_deg=self.step_rotation_deg,
-            world_up_axis="Y",  # AI2-THOR / Unity world convention
+            pitch_limit_deg=float(env_config.get("pitch_limit_deg", 89.0)),
+            roll_enabled=True,
             is_discrete=self.is_discrete,
             is_snap_every_step=self.is_snap_every_step,
-            image_y_down=self.image_y_down,
+            ground_plane_movement=self.ground_plane_movement,
         )
 
     # -------------------------
@@ -100,6 +101,24 @@ class GymAi2thorToolEnv(GymAi2thorRenderEnv):
                     "\n(Note: after every rotation, the Euler angles (rx, ry, rz) are "
                     "rounded to the nearest integer multiples of the rotation step along each axis.)\n"
                 )
+        if self.ground_plane_movement:
+            instruction += (
+                "\nGROUND-PLANE MOVEMENT\n"
+                "---------------------\n"
+                "- Forward/backward follow yaw only on the horizontal XZ plane; "
+                "looking up/down does not change that direction.\n"
+                "- Left/right strafe perpendicular to the heading on the horizontal "
+                "XZ plane.\n"
+                "- Up/down move only along world +Y/-Y.\n"
+                "- Turn left/right is yaw about world Y; look up/down is local pitch.\n"
+            )
+        else:
+            instruction += (
+                "\nCAMERA-LOCAL MOVEMENT (legacy)\n"
+                "------------------------------\n"
+                "- Translation follows the camera axes. After looking up/down, a "
+                "forward move can change both horizontal position and height.\n"
+            )
         return instruction
 
     @cached_property
@@ -140,13 +159,27 @@ class GymAi2thorToolEnv(GymAi2thorRenderEnv):
 
     @cached_property
     def action_description(self) -> Dict[str, str]:
+        if self.ground_plane_movement:
+            forward = "move forward along the yaw-only horizontal heading"
+            backward = "move backward along the yaw-only horizontal heading"
+            right = "strafe right on the horizontal XZ plane"
+            left = "strafe left on the horizontal XZ plane"
+            up = "move along world +Y"
+            down = "move along world -Y"
+        else:
+            forward = "move along camera-local forward"
+            backward = "move along camera-local backward"
+            right = "move along camera-local right"
+            left = "move along camera-local left"
+            up = "move along camera-local up"
+            down = "move along camera-local down"
         return {
-            "move_forward":  f"move forward on the ground plane by {self.step_translation} meters.",
-            "move_backward": f"move backward on the ground plane by {self.step_translation} meters.",
-            "move_right":    f"move right on the ground plane by {self.step_translation} meters.",
-            "move_left":     f"move left on the ground plane by {self.step_translation} meters.",
-            "move_up":       f"move up by {self.step_translation} meters.",
-            "move_down":     f"move down by {self.step_translation} meters.",
+            "move_forward":  f"{forward} by {self.step_translation} meters.",
+            "move_backward": f"{backward} by {self.step_translation} meters.",
+            "move_right":    f"{right} by {self.step_translation} meters.",
+            "move_left":     f"{left} by {self.step_translation} meters.",
+            "move_up":       f"{up} by {self.step_translation} meters.",
+            "move_down":     f"{down} by {self.step_translation} meters.",
             "turn_left":     f"yaw left by {self.step_rotation_deg} degrees.",
             "turn_right":    f"yaw right by {self.step_rotation_deg} degrees.",
             "look_up":       f"pitch up by {self.step_rotation_deg} degrees.",

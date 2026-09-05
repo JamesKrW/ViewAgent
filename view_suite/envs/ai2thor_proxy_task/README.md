@@ -31,12 +31,18 @@ view_suite/ai2thor/
 
 Generated from the simulator, not downloaded from a corpus:
 
+The current configs use the shared `ground_plane_v1` semantics: horizontal motion
+uses yaw only, world Y is vertical, and pitch changes viewing direction without
+changing a later forward/strafe direction. See
+`view_suite/envs/GROUND_PLANE_ACTION_SPACE.md`.
+
 ```bash
 export VIEWSUITE_ROOT=$(pwd)
 
 # 120 iTHOR scenes x 24 samples, 8 GPUs, resumable
 python -m view_suite.envs.ai2thor_proxy_task.data_gen.gen_parallel \
-    --out_root=$VIEWSUITE_ROOT/data/viewagent15k_ai2thor_full --scenes=all --samples_per_scene=24 --n_gpus=8
+    --out_root=$VIEWSUITE_ROOT/data/viewagent15k_ai2thor_ground_plane --scenes=all \
+    --samples_per_scene=24 --n_gpus=8 --ground_plane_movement=true
 
 # drop low-semantic views (blank walls and floors) with a VLM judge.
 # Needs OPENROUTER_API; set EGRESS_PROXY if outbound traffic requires a proxy.

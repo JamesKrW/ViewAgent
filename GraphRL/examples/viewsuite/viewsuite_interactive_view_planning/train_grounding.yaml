@@ -7,12 +7,12 @@
 envs:
   - name: InteractiveViewPlanning
     data_source: ae
-    seed: [0, 3389, 1]
-    n_envs: 3389
+    seed: [0, 3187, 1]
+    n_envs: 3188
     max_turns: 10
     response_length_per_turn: 1024
     config:
-      jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/viewsuite_15k/interactive_view_planning_train.jsonl
+      jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_scannet_open3d_ground_plane/interactive_view_planning_train.jsonl
       image_size: [256, 256]
       format: grounding
       use_example_in_sys_prompt: false
@@ -24,6 +24,7 @@ envs:
       give_answer_reward: 0.1
       action_only_mode: true
       allow_rotate: false
+      ground_plane_movement: true
       # Per-turn bonus when the model emits the reasoning format
       # `<observation>...</observation> ... <action>...</action>`.
       # 0 to disable. Only GymProxyTool reads this.

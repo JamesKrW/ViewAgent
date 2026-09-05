@@ -30,7 +30,7 @@ fileroot: ${oc.env:VIEWSUITE_ROOT}
 
 # Test-split size from the default small dataset (12 scenes -> 2 test scenes x
 # 8 samples = 16). Bump together with the data_gen / split parameters.
-n_envs: &n_envs 252
+n_envs: &n_envs 268
 
 default_chat_config:
   temperature: 0.0
@@ -42,11 +42,11 @@ envs:
   - name: Ai2ThorPath2View
     n_envs: *n_envs
     tag_id: path_to_view
-    seed: [1, 252, 1]
+    seed: [1, 268, 1]
     split: test
     max_turns: 1
     config:
-      jsonl_path: ${fileroot}/data/viewagent15k_ai2thor/path_to_view_test.jsonl
+      jsonl_path: ${fileroot}/data/viewagent15k_ai2thor_ground_plane/path_to_view_test.jsonl
       image_size: [512, 512]
       format: eval_mode
       example_count: 0
@@ -54,11 +54,11 @@ envs:
   - name: Ai2ThorView2Path
     n_envs: *n_envs
     tag_id: view_to_path
-    seed: [1, 252, 1]
+    seed: [1, 268, 1]
     split: test
     max_turns: 1
     config:
-      jsonl_path: ${fileroot}/data/viewagent15k_ai2thor/view_to_path_test.jsonl
+      jsonl_path: ${fileroot}/data/viewagent15k_ai2thor_ground_plane/view_to_path_test.jsonl
       image_size: [512, 512]
       format: eval_mode
       example_count: 0
@@ -66,11 +66,11 @@ envs:
   - name: Ai2ThorInteractiveViewPlanning
     n_envs: *n_envs
     tag_id: interactive_view_planning
-    seed: [1, 252, 1]
+    seed: [1, 268, 1]
     split: test
     max_turns: 10
     config:
-      jsonl_path: ${fileroot}/data/viewagent15k_ai2thor/interactive_view_planning_test.jsonl
+      jsonl_path: ${fileroot}/data/viewagent15k_ai2thor_ground_plane/interactive_view_planning_test.jsonl
       max_turns: 10
       render_backend: client
       client_url_file_path: ${fileroot}/client_url_ai2thor.txt
@@ -78,6 +78,8 @@ envs:
       format: eval_mode
       use_example_in_sys_prompt: false
       action_only_mode: true
+      allow_rotate: false
+      ground_plane_movement: true
 
 experiment:
   dump_dir: ${fileroot}/rollouts/default_ai2thor
