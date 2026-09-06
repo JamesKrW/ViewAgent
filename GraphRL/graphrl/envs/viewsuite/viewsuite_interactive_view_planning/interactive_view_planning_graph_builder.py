@@ -407,7 +407,14 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
 
         # New rollouts carry scene identity structurally. Keep prompt parsing as
         # backward compatibility for historical ScanNet/AI2-THOR files.
-        explicit_scene_id = (episode_data or {}).get("scene_id")
+        episode_data = episode_data or {}
+        metadata = episode_data.get("rollout_metadata")
+        explicit_scene_id = episode_data.get("scene_id")
+        if not explicit_scene_id and isinstance(metadata, dict):
+            # Normally VAGEN flattens env-selected rollout metadata at the JSONL
+            # boundary. Accept the structured form too so copied/intermediate artifacts
+            # do not have to leak scene identity into the model-visible prompt.
+            explicit_scene_id = metadata.get("scene_id")
         scene_id = str(explicit_scene_id).strip() if explicit_scene_id else None
         if scene_id is None:
             for msg in messages:

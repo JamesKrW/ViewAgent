@@ -185,6 +185,14 @@ class GymProxyTool(GymHabitatGSToolEnv):
             "success": False,
             "scene_id": item.get("scene_id"),
             "sample_id": item.get("sample_id"),
+            # Static identity travels beside the transcript, never inside the
+            # model-visible prompt. VAGEN treats this dictionary as opaque and writes
+            # its keys into the rollout artifact for GraphRL and other offline users.
+            "rollout_metadata": {
+                "scene_id": item.get("scene_id"),
+                "sample_id": item.get("sample_id"),
+                "jsonl_idx": idx,
+            },
             "gt_action_seq": item.get("gt_action_seq"),
             "pos_threshold_m": float(pos_thr_m),
             "ang_threshold_deg": float(ang_thr_deg),

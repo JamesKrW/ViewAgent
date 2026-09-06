@@ -171,6 +171,11 @@ class GymProxyTool(GymAi2thorToolEnv):
             "success": False,
             "scene_id": item.get("scene_id"),
             "sample_id": item.get("sample_id"),
+            "rollout_metadata": {
+                "scene_id": item.get("scene_id"),
+                "sample_id": item.get("sample_id"),
+                "jsonl_idx": idx,
+            },
             "gt_action_seq": item.get("gt_action_seq"),
             "pos_threshold_m": float(pos_thr_m),
             "ang_threshold_deg": float(ang_thr_deg),

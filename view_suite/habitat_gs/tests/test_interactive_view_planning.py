@@ -114,6 +114,14 @@ class HabitatGSInteractiveViewPlanningTest(unittest.TestCase):
                 self.assertIn("E0 (initial view)", obs["obs_str"])
                 self.assertNotIn("SUBMISSION RESULT", obs["obs_str"])
                 self.assertEqual(info["metrics"]["turns_used"], 0)
+                self.assertEqual(
+                    info["rollout_metadata"],
+                    {
+                        "scene_id": "test_scene",
+                        "sample_id": "test_sample",
+                        "jsonl_idx": 0,
+                    },
+                )
             finally:
                 await env.close()
 

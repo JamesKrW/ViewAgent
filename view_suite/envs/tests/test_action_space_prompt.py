@@ -4,6 +4,15 @@ import pytest
 
 from view_suite.ai2thor.gym_ai2thor_tool_env import GymAi2thorToolEnv
 from view_suite.envs.utils.parse_utils import ParsedAction
+from view_suite.envs.ai2thor_proxy_task.gym_proxy_tool import (
+    GymProxyTool as Ai2ThorProxyTool,
+)
+from view_suite.envs.habitat_gs_proxy_task.gym_proxy_tool import (
+    GymProxyTool as HabitatGSProxyTool,
+)
+from view_suite.envs.scannet_proxy_task.gym_proxy_tool import (
+    GymProxyTool as ScanNetProxyTool,
+)
 from view_suite.habitat_gs.gym_habitat_gs_tool_env import GymHabitatGSToolEnv
 from view_suite.habitat_gs.view_manipulator import HabitatGSViewManipulator
 from view_suite.scannet.gym_scannet_tool_env import GymScannetToolEnv
@@ -177,3 +186,23 @@ def test_habitat_snap_knob_controls_actual_camera_quantization():
     assert (unsnapped.yaw, unsnapped.pitch) == (17.0, 11.0)
     unsnapped.turn_left()
     assert unsnapped.yaw == 47.0
+
+
+@pytest.mark.parametrize(
+    "cls", [ScanNetProxyTool, Ai2ThorProxyTool, HabitatGSProxyTool]
+)
+def test_proxy_reset_info_exports_scene_identity_as_rollout_metadata(cls):
+    env = cls.__new__(cls)
+    env.tol_trans_l2_m = None
+    env.tol_rot_l2_deg = None
+    env.ground_plane_movement = False
+
+    info = env._info_reset(
+        {"scene_id": "scene-test", "sample_id": "sample-test"}, 7
+    )
+
+    assert info["rollout_metadata"] == {
+        "scene_id": "scene-test",
+        "sample_id": "sample-test",
+        "jsonl_idx": 7,
+    }
