@@ -5,7 +5,7 @@
 # service) works end-to-end on Qwen2.5-VL. Skips traj_to_sft + SFT.
 #
 # Prereqs (same as run.sh): VIEWSUITE_ROOT exported, render service up with
-# client_url_ai2thor.txt, dataset generated + split under data/ai2thor/.
+# client_url_ai2thor.txt, dataset generated + split under data/viewagent15k_ai2thor/.
 #
 # GPUs: defaults to 4 (set via CUDA_VISIBLE_DEVICES) so the render service GPU
 # is left alone. Override N_GPUS_PER_NODE / CUDA_VISIBLE_DEVICES as needed.

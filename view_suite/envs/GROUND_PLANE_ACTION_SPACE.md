@@ -41,15 +41,15 @@ scene split:
 
 ```bash
 python -m view_suite.envs.utils.regenerate_ground_plane_data \
-  --corpus scannet --src-root data/viewsuite_15k \
+  --corpus scannet --src-root data/viewagent15k_scannet_open3d \
   --out-root data/viewagent15k_scannet_open3d_ground_plane
 
 python -m view_suite.envs.utils.regenerate_ground_plane_data \
-  --corpus ai2thor --src-root data/ai2thor \
+  --corpus ai2thor --src-root data/viewagent15k_ai2thor \
   --out-root data/viewagent15k_ai2thor_ground_plane --render-backend local --gpu-id 0
 
 python -m view_suite.envs.utils.regenerate_ground_plane_data \
-  --corpus habitat_gs --src-root data/habitat_gs \
+  --corpus habitat_gs --src-root data/viewagent15k_habitat_gs \
   --out-root data/viewagent15k_habitat_gs_ground_plane
 ```
 

@@ -6,7 +6,7 @@ envs:
     max_turns: 10
     response_length_per_turn: 512
     config:
-      jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/viewsuite_15k/interactive_view_planning_dev.jsonl
+      jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_scannet_open3d/interactive_view_planning_dev.jsonl
       image_size: [512, 512]
       format: eval_mode
       use_example_in_sys_prompt: false

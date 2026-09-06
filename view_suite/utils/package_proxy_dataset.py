@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a clean, standalone proxy-task dataset tree.
 
-The release layout intentionally matches ``data/viewsuite_15k``: one dataset
+The release layout intentionally matches ``data/viewagent15k_scannet_open3d``: one dataset
 directory containing the three task JSONLs for train/validation/test and scene
 directories containing every referenced image.  Generation-only files (shards,
 logs, pre-filter JSONLs, verdicts, caches, and combined JSONLs) are not copied.

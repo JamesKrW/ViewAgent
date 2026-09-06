@@ -7,7 +7,7 @@
 #   - Habitat-GS HTTP render service running; its URL in
 #     $VIEWSUITE_ROOT/client_url_habitat_gs.txt  (see scripts/habitat_gs/habitat_gs_http_service_loop.sh)
 #   - Habitat-GS IVP dataset generated + split into _train/_eval/_test under
-#     $VIEWSUITE_ROOT/data/habitat_gs/
+#     $VIEWSUITE_ROOT/data/viewagent15k_habitat_gs/
 #
 # Usage:
 #   bash run.sh

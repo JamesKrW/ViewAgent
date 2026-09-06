@@ -15,7 +15,7 @@ Pipeline.yaml::
     traj_to_sft:
       module: graphrl.envs.viewsuite.viewsuite_interactive_view_planning.InteractiveViewPlanningTrajToSFT
       generators: [action_gen, path_to_view, ...]
-      viewsuite_15k_dir: ${oc.env:HOME}/projects/viewsuite/data/viewsuite_15k
+      viewsuite_15k_dir: ${oc.env:HOME}/projects/viewsuite/data/viewagent15k_scannet_open3d
       action_gen: { min_path_len: 1, max_path_len: 3, sample_per_scene: 15, ... }
       ...
       seed: 42

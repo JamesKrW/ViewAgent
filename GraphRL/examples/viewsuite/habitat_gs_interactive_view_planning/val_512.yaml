@@ -7,7 +7,7 @@ envs:
     max_turns: 10
     response_length_per_turn: 512
     config:
-      jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/habitat_gs/interactive_view_planning_eval.jsonl
+      jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_habitat_gs/interactive_view_planning_eval.jsonl
       image_size: [512, 512]
       format: eval_mode
       use_example_in_sys_prompt: false

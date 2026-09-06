@@ -23,7 +23,7 @@ envs:
     split: train
     max_turns: 10
     config:
-      jsonl_path: ${fileroot}/data/viewsuite_15k/interactive_view_planning_train.jsonl
+      jsonl_path: ${fileroot}/data/viewagent15k_scannet_open3d/interactive_view_planning_train.jsonl
       max_turns: 10
       render_backend: client
       client_url_file_path: ${fileroot}/client_url.txt
