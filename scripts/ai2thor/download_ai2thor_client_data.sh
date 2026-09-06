@@ -12,5 +12,5 @@
 
 python -m view_suite.utils.download_targz_hf \
     --repo=MLL-Lab/viewsuite \
-    --files="viewagent_ai2thor_full.tar.gz" \
+    --files="viewagent15k_ai2thor.tar.gz" \
     --out="$VIEWSUITE_ROOT/data"

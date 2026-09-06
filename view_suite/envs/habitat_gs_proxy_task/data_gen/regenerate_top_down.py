@@ -686,7 +686,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--habitat-gs-data-root",
         type=Path,
-        default=repo / "data/viewagent_habitat_gs",
+        default=repo / "data/viewagent15k_habitat_gs",
     )
     return parser
 

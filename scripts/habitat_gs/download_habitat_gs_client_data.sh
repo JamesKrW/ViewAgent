@@ -2,7 +2,7 @@
 # Habitat-GS proxy-task data (P2V / V2P / IVP) on 3D Gaussian-Splatting scenes.
 #
 # Produces:
-#   data/viewagent_habitat_gs/
+#   data/viewagent15k_habitat_gs/
 #     {path_to_view,view_to_path,interactive_view_planning}_{train,eval,test}.jsonl
 #     {interior_*,sceneNN*}/...   (rendered views + top_down.png)
 #
@@ -12,5 +12,5 @@
 
 python -m view_suite.utils.download_targz_hf \
     --repo=MLL-Lab/viewsuite \
-    --files="viewagent_habitat_gs_full.tar.gz" \
+    --files="viewagent15k_habitat_gs.tar.gz" \
     --out="$VIEWSUITE_ROOT/data"

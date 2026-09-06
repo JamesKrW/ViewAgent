@@ -420,7 +420,7 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path(os.environ.get("HABITAT_GS_SOURCE_ROOT", repo / "data/gs_scenes")),
     )
-    parser.add_argument("--data-root", type=Path, default=repo / "data/viewagent_habitat_gs")
+    parser.add_argument("--data-root", type=Path, default=repo / "data/viewagent15k_habitat_gs")
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--render-size", type=int, default=512)
     parser.add_argument("--output-size", type=int, default=512)

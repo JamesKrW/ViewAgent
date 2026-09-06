@@ -10,7 +10,7 @@ scene family (this corpus is half outdoor), and the per-scene translation step.
 
     ~/miniconda3/envs/habitat-gs/bin/python -m \
       view_suite.envs.habitat_gs_proxy_task.data_gen.analyse_eval \
-      --rollout_dir=rollouts/default_habitat_gs --data_root=data/viewagent_habitat_gs --split=test
+      --rollout_dir=rollouts/default_habitat_gs --data_root=data/viewagent15k_habitat_gs --split=test
 """
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ def _report(name: str, groups: Dict[str, List[bool]], min_n: int = 5) -> None:
         print(f"    {k:>14s}  n={len(v):>4d}  {100.0 * sum(v) / len(v):5.1f}%")
 
 
-def run(rollout_dir: str, data_root: str = "data/viewagent_habitat_gs", split: str = "test") -> None:
+def run(rollout_dir: str, data_root: str = "data/viewagent15k_habitat_gs", split: str = "test") -> None:
     for task, short in TASKS.items():
         eps = _episodes(rollout_dir, task)
         if not eps:

@@ -849,12 +849,12 @@ def _parser() -> argparse.ArgumentParser:
         description="Review unique AI2-THOR, ViewSuite, and Habitat-GS top-down images."
     )
     repo_root = _repo_root()
-    parser.add_argument("--ai2thor-root", type=Path, default=repo_root / "data/viewagent_ai2thor")
+    parser.add_argument("--ai2thor-root", type=Path, default=repo_root / "data/viewagent15k_ai2thor")
     parser.add_argument(
         "--viewsuite-root", type=Path, default=repo_root / "data/viewagent15k_scannet_open3d"
     )
     parser.add_argument(
-        "--habitat-gs-root", type=Path, default=repo_root / "data/viewagent_habitat_gs"
+        "--habitat-gs-root", type=Path, default=repo_root / "data/viewagent15k_habitat_gs"
     )
     parser.add_argument(
         "--output",
