@@ -105,6 +105,10 @@ general_overrides:
         save_freq: 20
         test_freq: 20
         log_val_generations: 32
+        # TrajToSFT consumes the observations paired with each saved rollout.
+        # Adaptive training stops this capture automatically after latching.
+        log_image:
+          enable: true
 
   traj_to_sft:
     module: graphrl.envs.viewsuite.viewsuite_interactive_view_planning.InteractiveViewPlanningTrajToSFT
@@ -132,7 +136,7 @@ general_overrides:
         step_translation: 0.5
         # AI2-THOR's grid step is uniform, so the global value is the real one.
         step_rotation: 30.0
-        size: 256
+        size: 512
         render_chunk: 32
         max_scene_concurrency: 8
     generators:

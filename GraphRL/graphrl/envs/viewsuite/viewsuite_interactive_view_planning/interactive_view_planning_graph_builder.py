@@ -458,11 +458,21 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
 
                 obs_img_path = None
                 if num_images > 0:
-                    obs_img_idx = (
-                        global_img_idx + num_images - 1
-                        if self_contained
-                        else global_img_idx
-                    )
+                    if self_contained:
+                        obs_img_idx = global_img_idx + num_images - 1
+                    else:
+                        # Reset prompts name reference images in display order.
+                        # Select the image explicitly labelled as the initial
+                        # view; current prompts order them target, initial,
+                        # top-down rather than placing the initial view first.
+                        initial_marker = re.search(
+                            r"initial view\s*<image>", content, re.IGNORECASE,
+                        )
+                        obs_img_idx = global_img_idx
+                        if initial_marker:
+                            obs_img_idx += content[:initial_marker.start()].count(
+                                _IMAGE_PLACEHOLDER
+                            )
                     for suffix in (".png", ".jpg"):
                         candidate = image_base / f"{obs_img_idx}{suffix}"
                         if candidate.exists():

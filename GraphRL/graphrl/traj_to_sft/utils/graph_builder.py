@@ -410,10 +410,32 @@ class VagenGraphBuilder:
     # ── internal: VAGEN parsing ──────────────────────────────────────────────
 
     def _parse_vagen_line(self, data: Dict[str, Any]) -> List[Dict[str, str]]:
-        """Parse ChatML VAGEN JSONL → conversation turns.  Override for other templates."""
+        """Parse VAGEN JSONL into conversation turns.
+
+        Older rollout writers preserved ChatML delimiters.  Newer tokenizer
+        versions decode with special tokens removed, leaving newline-delimited
+        role markers (``system\n...\nuser\n...``).  Accept both representations so
+        TrajToSFT can consume rollouts produced by either stack.
+        """
         full = (data.get("input", "") + data.get("output", "")).replace("<|endoftext|>", "")
         pattern = re.compile(r"<\|im_start\|>(\w+)\n(.*?)<\|im_end\|>", re.DOTALL)
-        return [
+        messages = [
             {"role": role, "content": content.strip()}
             for role, content in pattern.findall(full)
+        ]
+        if messages:
+            return messages
+
+        role_pattern = re.compile(r"^(system|user|assistant)\r?\n", re.MULTILINE)
+        markers = list(role_pattern.finditer(full))
+        return [
+            {
+                "role": marker.group(1),
+                "content": full[
+                    marker.end():markers[index + 1].start()
+                    if index + 1 < len(markers)
+                    else len(full)
+                ].strip(),
+            }
+            for index, marker in enumerate(markers)
         ]

@@ -543,13 +543,13 @@ def test_tracker_accepts_latched_checkpoint_without_rollout_images(tmp_path):
 
 
 
-def test_rollout_step_is_complete_on_jsonl_alone(tmp_path):
-    """verl writes no marker and no frames; the JSONL has to be the signal.
-
-    Requiring image_<step>/ kept durable_rollout_prefix at 0 and killed every run
-    at its first checkpoint.
-    """
+def test_rollout_step_requires_frames_without_completion_marker(tmp_path):
     (tmp_path / "1.jsonl").write_text('{"a": 1}\n', encoding="utf-8")
+    assert not rollout_step_is_complete(tmp_path, 1)
+
+    image_dir = tmp_path / "image_1" / "images_0"
+    image_dir.mkdir(parents=True)
+    (image_dir / "0.png").write_bytes(b"png")
     assert rollout_step_is_complete(tmp_path, 1)
     assert durable_rollout_prefix(tmp_path) == 1
 
