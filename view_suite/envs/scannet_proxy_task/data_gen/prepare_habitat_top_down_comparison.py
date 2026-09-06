@@ -141,14 +141,14 @@ def _parser() -> argparse.ArgumentParser:
         "--original-root",
         type=Path,
         default=Path(
-            os.environ.get("VIEWSUITE_ORIGINAL_ROOT", repo / "data/viewsuite_15k")
+            os.environ.get("VIEWSUITE_ORIGINAL_ROOT", repo / "data/viewagent15k_scannet_open3d")
         ),
     )
     parser.add_argument(
         "--habitat-root",
         type=Path,
         default=Path(
-            os.environ.get("VIEWSUITE_HABITAT_ROOT", repo / "data/viewsuite15k-habitat")
+            os.environ.get("VIEWSUITE_HABITAT_ROOT", repo / "data/viewagent15k_scannet_habitat")
         ),
     )
     parser.add_argument(

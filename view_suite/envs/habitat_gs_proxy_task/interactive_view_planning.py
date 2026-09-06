@@ -724,7 +724,7 @@ def _demo_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--jsonl",
         type=Path,
-        default=repo_root / "data/habitat_gs/interactive_view_planning_test.jsonl",
+        default=repo_root / "data/viewagent_habitat_gs/interactive_view_planning_test.jsonl",
     )
     parser.add_argument("--client-url", default="")
     parser.add_argument(

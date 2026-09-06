@@ -670,13 +670,13 @@ def _parser() -> argparse.ArgumentParser:
         "--viewsuite-meta-root",
         type=Path,
         default=Path(
-            os.environ.get("VIEWSUITE_HABITAT_ROOT", repo / "data/viewsuite15k-habitat")
+            os.environ.get("VIEWSUITE_HABITAT_ROOT", repo / "data/viewagent15k_scannet_habitat")
         ),
     )
     parser.add_argument(
         "--scannet-root",
         type=Path,
-        default=Path(os.environ.get("SCANNET_ROOT", repo / "data/scannet/scans")),
+        default=Path(os.environ.get("SCANNET_ROOT", repo / "data/viewagent_scannet/scans")),
     )
     parser.add_argument(
         "--habitat-gs-source-root",
@@ -686,7 +686,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--habitat-gs-data-root",
         type=Path,
-        default=repo / "data/habitat_gs",
+        default=repo / "data/viewagent_habitat_gs",
     )
     return parser
 

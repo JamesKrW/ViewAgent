@@ -142,7 +142,7 @@ After both, you should have:
 
 ```
 data/
-├── scannet/scans/...
+├── viewagent_scannet/scans/...
 └── viewagent15k_scannet_open3d/
     ├── interactive_view_planning_test.jsonl   # Interactive View Planning (IVP)
     ├── path_to_view_test.jsonl                # Path-to-View (P2V)

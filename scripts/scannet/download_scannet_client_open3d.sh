@@ -3,7 +3,7 @@
 # This is the default ScanNet client dataset.
 #
 # Produces:
-#   data/viewsuite_15k/
+#   data/viewagent15k_scannet_open3d/
 #     {path_to_view,view_to_path,interactive_view_planning}_{train,eval,test}.jsonl
 #     scene*/...   (rendered init/option/target/top-down views)
 #
@@ -13,5 +13,5 @@
 
 python -m view_suite.utils.download_targz_hf \
     --repo=MLL-Lab/viewsuite \
-    --files="viewsuite_15k.tar.gz" \
+    --files="viewagent15k_scannet_open3d.tar.gz" \
     --out="$VIEWSUITE_ROOT/data"

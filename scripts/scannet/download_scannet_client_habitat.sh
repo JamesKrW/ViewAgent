@@ -4,10 +4,10 @@
 # a clean A/B on identical task definitions.
 #
 # Produces:
-#   data/viewsuite_15k_habitat/     (sibling of viewsuite_15k, same layout)
+#   data/viewagent15k_scannet_habitat/     (sibling of viewagent15k_scannet_open3d, same layout)
 : "${VIEWSUITE_ROOT:?set up VIEWSUITE_ROOT first (default: your repo dir), e.g. export VIEWSUITE_ROOT=/path/to/ViewSuite}"
 
 python -m view_suite.utils.download_targz_hf \
     --repo=MLL-Lab/viewsuite \
-    --files="viewsuite_15k_habitat.tar.gz" \
+    --files="viewagent15k_scannet_habitat.tar.gz" \
     --out="$VIEWSUITE_ROOT/data"

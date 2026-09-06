@@ -380,9 +380,9 @@ def main() -> None:
     standalone_root.mkdir(parents=True, exist_ok=False)
 
     outputs = {
-        "base": standalone_root / "viewsuite_15k_habitat",
-        "p2v": standalone_root / "viewsuite_15k_habitat_p2v_intermediate",
-        "v2p": standalone_root / "viewsuite_15k_habitat_v2p_intermediate",
+        "base": standalone_root / "viewagent15k_scannet_habitat",
+        "p2v": standalone_root / "viewagent15k_scannet_habitat_p2v_intermediate",
+        "v2p": standalone_root / "viewagent15k_scannet_habitat_v2p_intermediate",
     }
     summaries = {
         "base": materialize_base(base_root, outputs["base"]),

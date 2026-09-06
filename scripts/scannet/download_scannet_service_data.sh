@@ -3,7 +3,7 @@
 # every turn; P2V/V2P read pre-rendered images and need none of this.
 #
 # Produces:
-#   data/scannet/scans/<scene_id>/...   (~32 GB)
+#   data/viewagent_scannet/scans/<scene_id>/...   (~32 GB)
 #
 # Serve it with:
 #   scripts/scannet/scannet_http_service_loop.sh 110 0,1,2,3,4,5,6,7 1 8813 86400 habitat
@@ -11,5 +11,5 @@
 
 python -m view_suite.utils.download_targz_hf \
     --repo=MLL-Lab/viewsuite \
-    --files="scannet.tar.gz" \
+    --files="viewagent_scannet.tar.gz" \
     --out="$VIEWSUITE_ROOT/data"

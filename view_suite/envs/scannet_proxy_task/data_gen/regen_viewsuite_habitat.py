@@ -861,13 +861,13 @@ def _build_intermediate_registry(
 
 def _default_paths() -> tuple[Path, Path, Path, Path]:
     root = Path(os.environ.get("VIEWSUITE_ROOT", Path.cwd())).resolve()
-    src = root / "data" / "viewsuite_15k"
+    src = root / "data" / "viewagent15k_scannet_open3d"
     shared = Path(os.environ.get("VIEWSUITE_DATA_ROOT", root / "data")).resolve()
     return (
         src,
-        shared / "viewsuite15k-habitat",
-        shared / "viewsuite15k-habitat-p2v-intermediate",
-        shared / "viewsuite15k-habitat-v2p-intermediate",
+        shared / "viewagent15k_scannet_habitat",
+        shared / "viewagent15k_scannet_habitat_p2v_intermediate",
+        shared / "viewagent15k_scannet_habitat_v2p_intermediate",
     )
 
 

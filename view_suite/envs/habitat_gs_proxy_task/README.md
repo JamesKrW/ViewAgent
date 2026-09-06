@@ -167,9 +167,9 @@ python -m view_suite.envs.habitat_gs_proxy_task.data_gen.promote_top_down \
   --manifest data/topdown_review/round_2_manifest.json \
   --dataset ai2thor=$RELEASE_ROOT/ai2thor \
   --dataset habitat_gs=$RELEASE_ROOT/habitat_gs \
-  --dataset viewsuite=$RELEASE_ROOT/viewsuite15k-habitat \
-  --metadata-only viewsuite=$RELEASE_ROOT/viewsuite15k-habitat-p2v-intermediate \
-  --metadata-only viewsuite=$RELEASE_ROOT/viewsuite15k-habitat-v2p-intermediate
+  --dataset viewsuite=$RELEASE_ROOT/viewagent15k_scannet_habitat \
+  --metadata-only viewsuite=$RELEASE_ROOT/viewagent15k_scannet_habitat_p2v_intermediate \
+  --metadata-only viewsuite=$RELEASE_ROOT/viewagent15k_scannet_habitat_v2p_intermediate
 # Inspect the report, then repeat with --apply.
 ```
 

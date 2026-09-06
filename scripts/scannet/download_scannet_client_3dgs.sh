@@ -3,7 +3,7 @@
 # reconstructions instead of the scanned mesh.
 #
 # Produces:
-#   data/viewsuite_15k_gs_test/     (sibling of viewsuite_15k, same layout)
+#   data/viewagent15k_scannet_gs_test/     (sibling of viewagent15k_scannet_open3d, same layout)
 #
 # Only the test split is released this way. To render more yourself you need the
 # 3DGS checkpoints -- see download_scannet_service_3dgs.sh.
@@ -11,5 +11,5 @@
 
 python -m view_suite.utils.download_targz_hf \
     --repo=MLL-Lab/viewsuite \
-    --files="viewsuite_15k_gs_test.tar.gz" \
+    --files="viewagent15k_scannet_gs_test.tar.gz" \
     --out="$VIEWSUITE_ROOT/data"

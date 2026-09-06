@@ -43,7 +43,7 @@ case "$CORPUS" in
   ai2thor)    EXAMPLE=ai2thor_interactive_view_planning;    ENV_CLASS=Ai2ThorInteractiveViewPlanning
               DATA_SUBDIR=ai2thor;    VAL_SPLIT=eval; URL_NAME=client_url_ai2thor.txt ;;
   viewsuite)  EXAMPLE=viewsuite_interactive_view_planning;  ENV_CLASS=InteractiveViewPlanning
-              DATA_SUBDIR=viewsuite_15k; VAL_SPLIT=dev;  URL_NAME=client_url.txt ;;
+              DATA_SUBDIR=viewagent15k_scannet_open3d; VAL_SPLIT=dev;  URL_NAME=client_url.txt ;;
   *) echo "unknown corpus: $CORPUS (expected habitat_gs, ai2thor or viewsuite)"; exit 2 ;;
 esac
 

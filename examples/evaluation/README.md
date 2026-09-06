@@ -49,5 +49,5 @@ layout so existing analysis scripts continue to work.
 Dataset prerequisites depend on the chosen YAML. ScanNet, AI2-THOR and
 Habitat-GS configurations use their corresponding directories below
 `$VIEWSUITE_ROOT/data`. The `eval_all_openrouter_gs` configs require the
-separate `data/viewsuite_15k_gs_test` artifact; generate or download it before
+separate `data/viewagent15k_scannet_gs_test` artifact; generate or download it before
 running those jobs.
