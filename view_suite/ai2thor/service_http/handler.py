@@ -41,7 +41,7 @@ import traceback
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -235,8 +235,12 @@ class _ThreadControllerPool:
             self.slot_gpu_ids = [None] * self.max_slots
 
         self.slots: List[Optional[_ControllerSlot]] = [None] * self.max_slots
-        self.scene_to_slot: Dict[str, int] = {}
+        self.request_to_slot: Dict[Tuple[str, int, int, float], int] = {}
         self._sched_lock = threading.Lock()
+        # A slot lock exists before its Controller does.  Locking only the
+        # Controller object allowed a burst for the same cold scene to create
+        # several Controllers concurrently and overwrite the same slot.
+        self._slot_locks = [threading.Lock() for _ in range(self.max_slots)]
 
         # Fixed-size thread pool prevents "can't start new thread" runaway.
         self._executor = ThreadPoolExecutor(max_workers=self.max_threads)
@@ -252,7 +256,7 @@ class _ThreadControllerPool:
                 with contextlib.suppress(Exception):
                     slot.controller.stop()
                 self.slots[i] = None
-            self.scene_to_slot.clear()
+            self.request_to_slot.clear()
 
         with contextlib.suppress(Exception):
             self._executor.shutdown(wait=True, cancel_futures=True)
@@ -260,7 +264,7 @@ class _ThreadControllerPool:
     def metrics(self) -> Dict[str, int]:
         return dict(self._metrics)
 
-    def _pick_slot_locked(self, scene_id: str) -> int:
+    def _pick_slot_locked(self, scene_id: str, width: int, height: int, fov: float) -> int:
         """Sticky -> empty (not yet reserved) -> LRU.
 
         Concurrency note: the _sched_lock only covers this function; the actual
@@ -268,23 +272,26 @@ class _ThreadControllerPool:
         (outside this lock). If we only check `slot is None`, a burst of distinct
         first-time scenes all observe all-None and all claim slot 0. Guard by
         also excluding slot indices that already appear as the target in
-        scene_to_slot.
+        request_to_slot.  Resolution and FOV are part of the cache key so
+        simultaneous 256px and 512px experiments do not continually reconstruct
+        one another's Controllers for the same scene.
         """
-        mapped = self.scene_to_slot.get(scene_id)
+        key = (scene_id, int(width), int(height), round(float(fov), 6))
+        mapped = self.request_to_slot.get(key)
         if mapped is not None:
             return mapped
 
-        reserved_idx = set(self.scene_to_slot.values())
+        reserved_idx = set(self.request_to_slot.values())
         for idx, slot in enumerate(self.slots):
             if slot is None and idx not in reserved_idx:
-                self.scene_to_slot[scene_id] = idx
+                self.request_to_slot[key] = idx
                 return idx
 
         idx = min(range(len(self.slots)), key=lambda i: self.slots[i].last_used if self.slots[i] else 0.0)
-        prev_slot = self.slots[idx]
-        if prev_slot is not None:
-            self.scene_to_slot.pop(prev_slot.scene_id, None)
-        self.scene_to_slot[scene_id] = idx
+        for old_key, old_idx in tuple(self.request_to_slot.items()):
+            if old_idx == idx:
+                self.request_to_slot.pop(old_key, None)
+        self.request_to_slot[key] = idx
         return idx
 
     def _create_slot(self, slot_idx: int, scene_id: str, width: int, height: int, fov: float) -> _ControllerSlot:
@@ -336,34 +343,48 @@ class _ThreadControllerPool:
         slot.height = int(height)
         slot.fov = float(fov)
 
-    def _ensure_slot_ready_for_request(self, slot_idx: int, scene_id: str) -> _ControllerSlot:
+    def _ensure_slot_ready_for_request(
+        self,
+        slot_idx: int,
+        scene_id: str,
+        width: int,
+        height: int,
+        fov: float,
+    ) -> _ControllerSlot:
         """
         Ensure slot exists and has correct scene for the request-level scene_id.
-        Uses DEFAULT params at request start (tasks may override later).
+        Uses the first task's params at request start (tasks may override later).
         """
         slot = self.slots[slot_idx]
         if slot is None:
-            slot = self._create_slot(slot_idx, scene_id, self.default_width, self.default_height, self.default_fov)
+            slot = self._create_slot(slot_idx, scene_id, width, height, fov)
             self.slots[slot_idx] = slot
             return slot
 
-        # If scene differs, do a reset (fast path)
-        if slot.scene_id != scene_id:
-            with slot.lock:
-                self._reset_slot_scene(slot, slot_idx, scene_id)
+        if slot.width != int(width) or slot.height != int(height) or float(slot.fov) != float(fov):
+            self._reconstruct_slot(slot, slot_idx, scene_id, width, height, fov)
+        elif slot.scene_id != scene_id:
+            self._reset_slot_scene(slot, slot_idx, scene_id)
 
         return slot
 
-    def _render_blocking(self, slot_idx: int, scene_id: str, tasks: List[Dict[str, Any]]) -> List[bytes]:
+    def _render_blocking(
+        self,
+        slot_idx: int,
+        scene_id: str,
+        tasks: List[Dict[str, Any]],
+        width: int,
+        height: int,
+        fov: float,
+    ) -> List[bytes]:
         """
         Blocking render function executed in this process' thread pool.
 
         Thread safety:
         - We lock the slot for the whole request, so one controller is used by one thread at a time.
         """
-        slot = self._ensure_slot_ready_for_request(slot_idx, scene_id)
-
-        with slot.lock:
+        with self._slot_locks[slot_idx]:
+            slot = self._ensure_slot_ready_for_request(slot_idx, scene_id, width, height, fov)
             slot.last_used = time.monotonic()
 
             out: List[bytes] = []
@@ -401,12 +422,27 @@ class _ThreadControllerPool:
 
     async def render(self, scene_id: str, tasks: List[Dict[str, Any]]) -> List[bytes]:
         """Async entry: schedule blocking render in thread pool."""
+        if tasks:
+            width, height, fov = _task_params(
+                tasks[0], self.default_width, self.default_height, self.default_fov
+            )
+        else:
+            width, height, fov = self.default_width, self.default_height, self.default_fov
         with self._sched_lock:
-            slot_idx = self._pick_slot_locked(scene_id)
+            slot_idx = self._pick_slot_locked(scene_id, width, height, fov)
             self._metrics["submit"] += 1
 
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._executor, self._render_blocking, slot_idx, scene_id, tasks)
+        return await loop.run_in_executor(
+            self._executor,
+            self._render_blocking,
+            slot_idx,
+            scene_id,
+            tasks,
+            width,
+            height,
+            fov,
+        )
 
 
 # =============================================================================
@@ -581,7 +617,7 @@ class AI2ThorRenderHandler(BaseHandler):
         fieldOfView: float = 90.0,
         *,
         max_process: int = 1,
-        max_threads: Optional[int] = 24,
+        max_threads: Optional[int] = None,
         max_slots: Optional[int] = None,
         **kwargs: Any,
     ):
