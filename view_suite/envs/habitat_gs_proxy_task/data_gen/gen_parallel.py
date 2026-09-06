@@ -3,7 +3,8 @@
 Resumable: a scene whose marker file exists is skipped, so an interrupted run picks up
 where it stopped instead of re-rendering. Each scene writes its own shard; shards are
 concatenated at the end. That is deliberate -- 129 scenes appending to three shared
-JSONL files from 8 processes is a corrupted-line generator.
+JSONL files from 8 processes is a corrupted-line generator. After a successful merge,
+the shard directory is removed by default; pass ``--keep_shards=True`` to retain it.
 
     VIEWSUITE_ROOT=$PWD PYTHONPATH=$PWD ~/miniconda3/envs/habitat-gs/bin/python \
       -m view_suite.envs.habitat_gs_proxy_task.data_gen.gen_parallel \
@@ -14,6 +15,7 @@ from __future__ import annotations
 import json
 import multiprocessing as mp
 import os
+import shutil
 import time
 from typing import List, Optional
 
@@ -62,6 +64,7 @@ def run(
     eye_height_m: float = 1.5,
     seed: int = 0,
     ground_plane_movement: bool = False,
+    keep_shards: bool = False,
 ) -> None:
     root = root or default_root()
     scene_ids: List[str] = parse_subset(scenes, root=root)
@@ -95,6 +98,10 @@ def run(
                         w.write(r.read())
         n = sum(1 for _ in open(out))
         print(f"{out}: {n} rows")
+
+    if not keep_shards:
+        shutil.rmtree(shard_dir)
+        print(f"removed completed shard directory: {shard_dir}")
 
 
 if __name__ == "__main__":
