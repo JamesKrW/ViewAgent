@@ -112,7 +112,7 @@ general_overrides:
     # this dir. For Habitat-GS this points at the generated dataset root; the full
     # distillation path may need per-generator path adaptation (the RL-only smoke
     # does not exercise it).
-    viewsuite_15k_dir: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_habitat_gs_ground_plane
+    viewsuite_15k_dir: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_habitat_gs
     graph_builder:
       num_workers: 4
       filter:
@@ -126,9 +126,9 @@ general_overrides:
         # frame, and ending up further from the target than not moving at all.
         enabled: true
         corpus: habitat_gs
-        ground_plane_movement: true
+        ground_plane_movement: false
         client_url: null       # null -> $VIEWSUITE_ROOT/client_url_habitat_gs.txt
-        corpus_dir: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_habitat_gs_ground_plane
+        corpus_dir: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_habitat_gs
         step_translation: 0.5
         # Habitat-GS scales the step per scene (0.25-8 m); corpus_dir supplies the
         # real value per scene and this global is only the fallback.

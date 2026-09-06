@@ -112,7 +112,7 @@ general_overrides:
     # this dir. For AI2-THOR this points at the generated dataset root; the full
     # distillation path may need per-generator path adaptation (the RL-only smoke
     # does not exercise it).
-    viewsuite_15k_dir: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_ai2thor_ground_plane
+    viewsuite_15k_dir: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_ai2thor
     graph_builder:
       num_workers: 4
       filter:
@@ -126,9 +126,9 @@ general_overrides:
         # frame, and ending up further from the target than not moving at all.
         enabled: true
         corpus: ai2thor
-        ground_plane_movement: true
+        ground_plane_movement: false
         client_url: null       # null -> $VIEWSUITE_ROOT/client_url_ai2thor.txt
-        corpus_dir: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_ai2thor_ground_plane
+        corpus_dir: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_ai2thor
         step_translation: 0.5
         # AI2-THOR's grid step is uniform, so the global value is the real one.
         step_rotation: 30.0

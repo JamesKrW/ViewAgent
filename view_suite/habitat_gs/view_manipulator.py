@@ -14,7 +14,9 @@ the body origin, so the camera position *is* the body position:
 
 Forward/strafe are always body-local and horizontal. ``ground_plane_movement`` selects
 whether up/down use strict world Y (the shared ``ground_plane_v1`` convention) or the
-native viewer's sensor-local Y. There is no roll action.
+native viewer's sensor-local Y. ``is_snap_every_step`` independently controls whether
+yaw and pitch are rounded to the rotation-step grid in discrete mode. There is no roll
+action.
 """
 from __future__ import annotations
 
@@ -76,6 +78,7 @@ class HabitatGSViewManipulator:
         step_rotation_deg: float = 30.0,  # the proxy tasks' step, not Habitat's 10
         pitch_limit_deg: float = 60.0,
         discrete: bool = True,
+        is_snap_every_step: bool = True,
         ground_plane_movement: bool = False,
     ):
         self.pos = np.asarray(position, dtype=np.float64).copy()
@@ -85,13 +88,14 @@ class HabitatGSViewManipulator:
         self.step_r = float(step_rotation_deg)
         self.pitch_limit = float(pitch_limit_deg)
         self.is_discrete = bool(discrete)
+        self.is_snap_every_step = bool(is_snap_every_step) and self.is_discrete
         self.ground_plane_movement = bool(ground_plane_movement)
-        if self.is_discrete:
+        if self.is_snap_every_step:
             self._snap_angles()
 
     # ── state ────────────────────────────────────────────────────────────────
     def _snap_angles(self) -> None:
-        if not self.is_discrete:
+        if not self.is_snap_every_step:
             return
         self.yaw = _snap(self.yaw, self.step_r)
         self.pitch = _snap(self.pitch, self.step_r)

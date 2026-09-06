@@ -17,6 +17,7 @@ from abc import abstractmethod
 from functools import cached_property
 from typing import Any, Dict, List, Tuple
 
+from view_suite.envs.utils.action_space_prompt import build_action_space_instruction
 from view_suite.envs.utils.parse_utils import FormatRegistry, ParsedAction, parse_actions
 from view_suite.habitat_gs.gym_habitat_gs_render_env import GymHabitatGSRenderEnv
 from view_suite.habitat_gs.view_manipulator import HabitatGSViewManipulator
@@ -30,6 +31,7 @@ class GymHabitatGSToolEnv(GymHabitatGSRenderEnv):
         self.step_translation = float(env_config.get("step_translation", 0.5))
         self.step_rotation_deg = float(env_config.get("step_rotation_deg", 30.0))
         self.is_discrete = bool(env_config.get("is_discrete", True))
+        self.is_snap_every_step = bool(env_config.get("is_snap_every_step", True))
         self.pitch_limit_deg = float(env_config.get("pitch_limit_deg", 60.0))
         self.action_only_mode = bool(env_config.get("action_only_mode", False))
         self.ground_plane_movement = bool(
@@ -40,6 +42,7 @@ class GymHabitatGSToolEnv(GymHabitatGSRenderEnv):
             step_rotation_deg=self.step_rotation_deg,
             pitch_limit_deg=self.pitch_limit_deg,
             discrete=self.is_discrete,
+            is_snap_every_step=self.is_snap_every_step,
             ground_plane_movement=self.ground_plane_movement,
         )
 
@@ -78,41 +81,35 @@ class GymHabitatGSToolEnv(GymHabitatGSRenderEnv):
 
     @cached_property
     def action_description(self) -> Dict[str, str]:
-        # Rounded for display only: a per-scene step is an awkward float and
-        # "0.6501199473505435 meters" in a prompt is noise. The camera uses the exact
-        # value, which differs by <5 mm against a 0.5 m success threshold.
-        t, r = round(self.step_translation, 2), round(self.step_rotation_deg, 2)
         vertical_up = ("move along world +Y" if self.ground_plane_movement
                        else "move along sensor-local up")
         vertical_down = ("move along world -Y" if self.ground_plane_movement
                          else "move along sensor-local down")
         return {
-            "move_forward":  f"move forward on the ground plane by {t} meters.",
-            "move_backward": f"move backward on the ground plane by {t} meters.",
-            "move_left":     f"strafe left on the ground plane by {t} meters.",
-            "move_right":    f"strafe right on the ground plane by {t} meters.",
-            "move_up":       f"{vertical_up} by {t} meters.",
-            "move_down":     f"{vertical_down} by {t} meters.",
-            "turn_left":     f"turn left by {r} degrees, about the vertical axis.",
-            "turn_right":    f"turn right by {r} degrees, about the vertical axis.",
-            "look_up":       f"tilt the camera up by {r} degrees "
-                             f"(clamped to +/-{self.pitch_limit_deg}).",
-            "look_down":     f"tilt the camera down by {r} degrees "
-                             f"(clamped to +/-{self.pitch_limit_deg}).",
-            "query_pose":    "query_pose(view_name), return the 6-DoF pose of a named view "
-                             "in DEGREES; does NOT change the camera.",
-            "select_view":   "select_view(view_name), reset the camera to the named view "
-                             "and render an image.",
-            "get_view":      "get_view(tx, ty, tz, rx, ry, rz), directly set the camera "
-                             "pose (c2w, Euler XYZ in DEGREES) and render an image.",
+            "move_forward":  "move forward along the yaw-only horizontal heading.",
+            "move_backward": "move backward along the yaw-only horizontal heading.",
+            "move_left":     "strafe left on the horizontal XZ plane.",
+            "move_right":    "strafe right on the horizontal XZ plane.",
+            "move_up":       f"{vertical_up}.",
+            "move_down":     f"{vertical_down}.",
+            "turn_left":     "yaw left about world Y.",
+            "turn_right":    "yaw right about world Y.",
+            "look_up":       f"pitch up about sensor-local X (clamped to "
+                             f"+/-{self.pitch_limit_deg} degrees).",
+            "look_down":     f"pitch down about sensor-local X (clamped to "
+                             f"+/-{self.pitch_limit_deg} degrees).",
+            "query_pose":    "return the 6-DoF pose of a named view in DEGREES; does "
+                             "NOT change the camera.",
+            "select_view":   "reset the camera to the named view and render an image.",
+            "get_view":      "directly set the camera pose (c2w, Euler XYZ in "
+                             "DEGREES) and render an image.",
             # The spelled-out signature and the positional-only sentence are load-bearing:
             # with a vaguer description Qwen2.5-VL emitted answer(tx=..., ty=...) with
             # keyword arguments, the parser rejected every one of them, and IVP scored
             # 0/288 with 287 episodes running out of turns. The model was answering; the
             # prompt had not told it how.
-            "answer":        "answer(tx, ty, tz, rx, ry, rz), where tx, ty, tz are "
-                             "translation in meters and rx, ry, rz are rotation in "
-                             "degrees. All arguments must be positional plain numbers. "
+            "answer":        "submit tx, ty, tz in meters and rx, ry, rz in degrees. "
+                             "All arguments must be positional plain numbers. "
                              "This action is terminal and no further actions can be "
                              "taken.",
         }
@@ -120,56 +117,36 @@ class GymHabitatGSToolEnv(GymHabitatGSRenderEnv):
     @cached_property
     def _tool_instruction(self) -> str:
         actions = self._action_only_allowed if self.action_only_mode else self._action_full
-        lines = ["SUPPORTED ACTIONS", "-----------------",
-                 "Arguments are inside parentheses.", ""]
-        lines += [f"- {name} : {self.action_description[name]}" for name in actions]
-        instruction = "\n".join(lines).strip()
-
-        if not self.action_only_mode:
-            instruction += (
-                "\n\nACTION ORDER CONSTRAINTS\n"
-                "------------------------\n"
-                "- You MUST call exactly one of:\n"
-                "    - select_view(view_name), or\n"
-                "    - get_view(tx, ty, tz, rx, ry, rz)\n"
-                "before performing ANY of the following actions:\n"
-                "    move_*, turn_*, look_*.\n\n"
-                "- Calling move / turn / look before a view is selected\n"
-                "is INVALID and will result in failure.\n\n"
-                "- query_pose(...) does NOT count as selecting a view.\n\n"
-                "- The episode terminates immediately after calling answer(...).\n"
-                "No further actions are allowed.\n"
-            )
-        else:
-            instruction += (
-                "\n- The episode terminates immediately after calling answer(...).\n"
-                "No further actions are allowed.\n"
-            )
-
-        instruction += (
-            "\nCAMERA MODEL\n"
-            "------------\n"
-            "- Turning is about the vertical axis only, so the horizon stays level.\n"
-            "- Forward/backward/left/right move along the ground plane; they are NOT\n"
-            "  affected by how far up or down the camera is tilted.\n"
-            "- There is no roll action: the camera never rotates about its view axis.\n"
-        )
         if self.ground_plane_movement:
-            instruction += (
-                "- Up/down move strictly along world +Y/-Y, independent of pitch.\n"
+            mode_description = (
+                "Habitat body movement; forward/backward/strafe are yaw-only and "
+                "horizontal, while up/down use world Y"
             )
         else:
-            instruction += (
-                "- Up/down follow sensor-local up/down and therefore tilt with pitch.\n"
+            mode_description = (
+                "native Habitat viewer movement; forward/backward/strafe are yaw-only "
+                "and horizontal, while up/down follow the pitched sensor"
             )
-        if self.is_discrete:
-            instruction += (
-                "\nDISCRETE MODE\n"
-                "-------------\n"
-                f"- translation step: {self.step_translation:.2f} meters\n"
-                f"- rotation step: {self.step_rotation_deg:.0f} degrees\n"
-            )
-        return instruction
+        # Per-scene Habitat steps can be awkward floats.  The corpus stores them at
+        # two-decimal precision, so quote that same value in the prompt.
+        return build_action_space_instruction(
+            is_discrete=self.is_discrete,
+            snap_rotations=self.is_discrete and self.is_snap_every_step,
+            step_translation=str(round(self.step_translation, 2)),
+            step_rotation_deg=str(round(self.step_rotation_deg, 2)),
+            mode_description=mode_description,
+            coordinate_description=(
+                "horizontal plane is XZ; world up is +Y; roll is unavailable"
+            ),
+            snap_description=(
+                "after a pose is initialized/set and after every rotation, controller "
+                "yaw and pitch are rounded to the nearest multiples of the rotation step."
+            ),
+            actions=actions,
+            action_descriptions=self.action_description,
+            action_only_mode=self.action_only_mode,
+            motion_wildcards="move_*, turn_*, or look_* action",
+        )
 
     @cached_property
     def _view_dict(self) -> Dict[str, Any]:

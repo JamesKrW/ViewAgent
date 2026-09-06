@@ -31,37 +31,37 @@ default_chat_config:
 envs:
 
   - name: Path2View
-    n_envs: 497
+    n_envs: 530
     tag_id: path_to_view
-    seed: [1,497,1]
+    seed: [1,530,1]
     split: test
     max_turns: 1
     config:
-      jsonl_path: ${fileroot}/data/viewagent15k_scannet_open3d_ground_plane/path_to_view_test.jsonl
+      jsonl_path: ${fileroot}/data/viewagent15k_scannet_open3d/path_to_view_test.jsonl
       image_size: [512,512]
       format: eval_mode
       example_count: 0
 
   - name: View2Path
-    n_envs: 497
+    n_envs: 530
     tag_id: view_to_path
-    seed: [1,497,1]
+    seed: [1,530,1]
     split: test
     max_turns: 1
     config:
-      jsonl_path: ${fileroot}/data/viewagent15k_scannet_open3d_ground_plane/view_to_path_test.jsonl
+      jsonl_path: ${fileroot}/data/viewagent15k_scannet_open3d/view_to_path_test.jsonl
       image_size: [512,512]
       format: eval_mode
       example_count: 0
 
   - name: InteractiveViewPlanning
-    n_envs: 497
+    n_envs: 530
     tag_id: interactive_view_planning
-    seed: [1,497,1]
+    seed: [1,530,1]
     split: test
     max_turns: 10
     config:
-      jsonl_path: ${fileroot}/data/viewagent15k_scannet_open3d_ground_plane/interactive_view_planning_test.jsonl
+      jsonl_path: ${fileroot}/data/viewagent15k_scannet_open3d/interactive_view_planning_test.jsonl
       max_turns: 10
       render_backend: client
       client_url_file_path: ${fileroot}/client_url.txt
@@ -70,7 +70,7 @@ envs:
       use_example_in_sys_prompt: false
       action_only_mode: true
       allow_rotate: false
-      ground_plane_movement: true
+      ground_plane_movement: false
 
 experiment:
   dump_dir: ${fileroot}/rollouts/default

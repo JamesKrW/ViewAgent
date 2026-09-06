@@ -8,6 +8,7 @@ from typing import Tuple, List
 from dataclasses import dataclass
 from typing import Optional
 from functools import cached_property
+from view_suite.envs.utils.action_space_prompt import build_action_space_instruction
 from view_suite.envs.utils.parse_utils import ParsedAction, FormatRegistry, parse_actions
 
 
@@ -68,72 +69,41 @@ class GymScannetToolEnv(GymScannetRenderEnv):
 
     @cached_property
     def _tool_instruction(self) -> str:
-        
-
-        lines = [
-            "SUPPORTED ACTIONS",
-            "-----------------",
-            "Arguments are inside parentheses.",
-            "",
-        ]
-        actions= self._action_only_allowed if self.action_only_mode else self._action_full
-        lines += [f"- {name} : {self.action_description[name]}" for name in actions]
-
-        instruction = "\n".join(lines).strip()
-
-        if not self.action_only_mode:
-            instruction += (
-                "\n\nACTION ORDER CONSTRAINTS\n"
-                "------------------------\n"
-                "- You MUST call exactly one of:\n"
-                "    - select_view(view_name), or\n"
-                "    - get_view(tx, ty, tz, rx, ry, rz)\n"
-                "before performing ANY of the following actions:\n"
-                "    move_*, turn_*, look_*, rotate_*.\n\n"
-                "- Calling move / turn / look / rotate before a view is selected\n"
-                "is INVALID and will result in failure.\n\n"
-                "- query_pose(...) does NOT count as selecting a view.\n\n"
-                "- The episode terminates immediately after calling answer(...).\n"
-                "No further actions are allowed.\n"
-            )
-        else:
-            instruction += (
-               "- The episode terminates immediately after calling answer(...).\n"
-                "No further actions are allowed.\n"
-            )
-        if self.is_discrete:
-            instruction += (
-                "\nDISCRETE MODE\n"
-                "-------------\n"
-                f"- translation step: {self.step_translation} meters\n"
-                f"- rotation step: {self.step_rotation_deg} degrees\n"
-            )
-            if self.is_snap_every_step:
-                instruction += (
-                    "\n(Note: after every rotation, the Euler angles (rx, ry, rz) are "
-                    "rounded to the nearest integer multiples of the rotation step along each axis.)\n"
-                )
-
+        actions = self._action_only_allowed if self.action_only_mode else self._action_full
         if self.ground_plane_movement:
-            instruction += (
-                "\nGROUND-PLANE MOVEMENT\n"
-                "---------------------\n"
-                "- Forward/backward follow the camera heading projected onto the "
-                "horizontal XY plane; looking up/down does not change that direction.\n"
-                "- Left/right strafe perpendicular to that heading on the horizontal "
-                "XY plane.\n"
-                "- Up/down move only along world +Z/-Z.\n"
-                "- Turn left/right is yaw about world Z; look up/down is local pitch.\n"
+            mode_description = (
+                "ground-aligned body movement; camera tilt changes the view but does "
+                "not tilt translation directions"
             )
         else:
-            instruction += (
-                "\nCAMERA-LOCAL MOVEMENT (legacy)\n"
-                "------------------------------\n"
-                "- Translation follows the camera axes. After looking up/down, a "
-                "forward move can change both horizontal position and height.\n"
+            mode_description = (
+                "full camera-local translation; after looking up/down, forward can "
+                "have both horizontal and vertical components"
             )
-
-        return instruction
+        return build_action_space_instruction(
+            is_discrete=self.is_discrete,
+            snap_rotations=self.is_discrete and self.is_snap_every_step,
+            step_translation=str(self.step_translation),
+            step_rotation_deg=str(self.step_rotation_deg),
+            mode_description=mode_description,
+            coordinate_description=(
+                "horizontal plane is XY; world up is +Z; roll actions are "
+                + ("enabled" if self.allow_rotate else "disabled")
+            ),
+            snap_description=(
+                "after a pose is initialized/set and after every rotation, the c2w "
+                "Euler XYZ angles are rounded to the nearest multiples of the "
+                "rotation step."
+            ),
+            actions=actions,
+            action_descriptions=self.action_description,
+            action_only_mode=self.action_only_mode,
+            motion_wildcards=(
+                "move_*, turn_*, look_*, or rotate_* action"
+                if self.allow_rotate
+                else "move_*, turn_*, or look_* action"
+            ),
+        )
 
 
     @cached_property
@@ -188,7 +158,7 @@ class GymScannetToolEnv(GymScannetRenderEnv):
 
     @property
     def _action_full(self) -> tuple[str, ...]:
-        return (
+        actions = (
             "move_forward",
             "move_backward",
             "move_right",
@@ -199,8 +169,10 @@ class GymScannetToolEnv(GymScannetRenderEnv):
             "turn_right",
             "look_up",
             "look_down",
-            "rotate_ccw",
-            "rotate_cw",
+        )
+        if self.allow_rotate:
+            actions += ("rotate_ccw", "rotate_cw")
+        return actions + (
             "query_pose",
             "select_view",
             "get_view",
@@ -224,22 +196,24 @@ class GymScannetToolEnv(GymScannetRenderEnv):
             up = "move along camera-local screen-up"
             down = "move along camera-local screen-down"
         return {
-            "move_forward": f"{forward} by {self.step_translation} meters.",
-            "move_backward": f"{backward} by {self.step_translation} meters.",
-            "move_right": f"{right} by {self.step_translation} meters.",
-            "move_left": f"{left} by {self.step_translation} meters.",
-            "move_up": f"{up} by {self.step_translation} meters.",
-            "move_down": f"{down} by {self.step_translation} meters.",
-            "turn_left": f"yaw left by {self.step_rotation_deg} degrees.",
-            "turn_right": f"yaw right by {self.step_rotation_deg} degrees.",
-            "look_up": f"pitch up by {self.step_rotation_deg} degrees.",
-            "look_down": f"pitch down by {self.step_rotation_deg} degrees.",
-            "rotate_ccw": f"roll counter clockwise by {self.step_rotation_deg} degrees.",
-            "rotate_cw": f"roll clockwise by {self.step_rotation_deg} degrees.",
-            "query_pose": "query_pose(view_name), return the 6-DoF pose of a named view in DEGREES; does NOT change the camera.",
-            "select_view": "select_view(view_name), reset the camera to the named view and render an image.",
-            "get_view": "get_view(tx, ty, tz, rx, ry, rz), directly set the camera pose (c2w, Euler XYZ in DEGREES) and render an image.",
-            "answer": "answer(tx, ty, tz, rx, ry, rz), where tx, ty, tz are translation in meters and rx, ry, rz are rotation in degrees. All arguments must be positional plain numbers. This action is terminal and no further actions can be taken.",
+            "move_forward": f"{forward}.",
+            "move_backward": f"{backward}.",
+            "move_right": f"{right}.",
+            "move_left": f"{left}.",
+            "move_up": f"{up}.",
+            "move_down": f"{down}.",
+            "turn_left": "yaw left about world Z." if self.ground_plane_movement
+                         else "yaw left about camera-local Y.",
+            "turn_right": "yaw right about world Z." if self.ground_plane_movement
+                          else "yaw right about camera-local Y.",
+            "look_up": "pitch up about camera-local X.",
+            "look_down": "pitch down about camera-local X.",
+            "rotate_ccw": "roll counter-clockwise about the camera view axis.",
+            "rotate_cw": "roll clockwise about the camera view axis.",
+            "query_pose": "return the 6-DoF pose of a named view in DEGREES; does NOT change the camera.",
+            "select_view": "reset the camera to the named view and render an image.",
+            "get_view": "directly set the camera pose (c2w, Euler XYZ in DEGREES) and render an image.",
+            "answer": "submit tx, ty, tz in meters and rx, ry, rz in degrees. All arguments must be positional plain numbers. This action is terminal and no further actions can be taken.",
         }
         
     
@@ -289,6 +263,14 @@ class GymScannetToolEnv(GymScannetRenderEnv):
                 "success": False,
                 "is_answer": False,
                 "result": f"action not allowed in action_only_mode: {action.name}",
+                "need_render": False,
+            }
+
+        if not self.allow_rotate and action.name in {"rotate_ccw", "rotate_cw"}:
+            return {
+                "success": False,
+                "is_answer": False,
+                "result": f"action disabled by allow_rotate=false: {action.name}",
                 "need_render": False,
             }
 

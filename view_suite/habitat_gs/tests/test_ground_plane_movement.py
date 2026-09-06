@@ -8,6 +8,12 @@ from view_suite.habitat_gs.view_manipulator import HabitatGSViewManipulator
 from view_suite.scannet.view_manipulator import ViewManipulator as ScanNetManipulator
 
 
+def test_reusable_manipulators_default_to_legacy_movement():
+    assert ScanNetManipulator().ground_plane_movement is False
+    assert Ai2ThorManipulator().ground_plane_movement is False
+    assert HabitatGSViewManipulator().ground_plane_movement is False
+
+
 def _scannet_level_pose() -> np.ndarray:
     """OpenCV camera: +X right, +Y down, +Z forward; world +Z is up."""
     c2w = np.eye(4, dtype=np.float64)

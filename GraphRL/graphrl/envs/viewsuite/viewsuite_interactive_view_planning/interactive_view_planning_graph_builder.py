@@ -53,9 +53,9 @@ _VALID_ACTIONS = frozenset({
     "look_up", "look_down", "rotate_cw", "rotate_ccw",
 })
 
-# Habitat-GS' compact IVP environment uses viewer keys while the graph and SFT
-# generators use corpus-independent semantic action names.  Normalise at the
-# ingestion boundary; ScanNet/AI2-THOR's existing semantic names pass through.
+# Older Habitat-GS IVP rollouts may contain viewer-key aliases. Normalise them at
+# the ingestion boundary; current Habitat-GS, ScanNet, and AI2-THOR rollouts all
+# emit the corpus-independent semantic action names directly.
 _ACTION_ALIASES = {
     "w": "move_forward",
     "s": "move_backward",

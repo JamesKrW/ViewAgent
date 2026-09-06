@@ -47,9 +47,10 @@ still looks correct. This is the failure mode the AI2-THOR pair has, and it bit 
 too — before the fix, 265 of 288 test samples were told a 0.5 m step the data did not
 use.
 
-One thing to know before tuning the pitch limit: pitch snaps to multiples of the
-rotation step, so at the default 30° step a limit of 40 and a limit of 45 both cap at
-30. Only multiples of the step are reachable.
+One thing to know before tuning the pitch limit: with the default
+`is_snap_every_step: true`, pitch snaps to multiples of the rotation step, so at the
+default 30° step a limit of 40 and a limit of 45 both cap at 30. Set the knob to
+`false` when those intermediate angles should remain reachable.
 
 ## Data
 

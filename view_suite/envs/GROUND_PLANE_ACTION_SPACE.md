@@ -21,12 +21,20 @@ The exact world axes differ by corpus, but the agent-facing semantics do not:
   heading.
 - Roll is excluded from the unified navigation set.
 
-The old default remains `ground_plane_movement: false` in the reusable
-manipulators so legacy datasets remain replayable. New rows carry both
+The default remains `ground_plane_movement: false` in the reusable manipulators
+and the standard train/eval configs, which continue to use the legacy datasets.
+Ground-plane mode is opt-in and must be paired with a matching `_ground_plane`
+dataset. New rows carry both
 `"ground_plane_movement": true` and
 `"action_space_version": "ground_plane_v1"`; proxy environments reject an
 explicit mode mismatch instead of silently training against an unreachable
 target.
+
+Rotation quantization is a separate knob in all three proxy environments:
+`is_snap_every_step: true` rounds the environment's controller angles after
+pose initialization and each rotation when `is_discrete: true`; setting it to
+`false` keeps the resulting angles unsnapped. The runtime action-space prompt
+reports the effective setting instead of always printing the old rounding note.
 
 To derive a ground-plane corpus from an accepted dataset while preserving its
 scene split:

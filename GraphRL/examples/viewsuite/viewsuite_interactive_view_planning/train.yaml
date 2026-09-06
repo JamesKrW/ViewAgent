@@ -1,12 +1,12 @@
 envs:
   - name: InteractiveViewPlanning
     data_source: ae
-    seed: [0, 3187, 1]
-    n_envs: 3188
+    seed: [0, 3388, 1]
+    n_envs: 3389
     max_turns: 10
     response_length_per_turn: 512
     config:
-      jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_scannet_open3d_ground_plane/interactive_view_planning_train.jsonl
+      jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_scannet_open3d/interactive_view_planning_train.jsonl
       image_size: [256, 256]
       format: eval_mode
       use_example_in_sys_prompt: false
@@ -15,4 +15,4 @@ envs:
       max_turns: 10
       action_only_mode: true
       allow_rotate: false
-      ground_plane_movement: true
+      ground_plane_movement: false

@@ -31,10 +31,10 @@ view_suite/ai2thor/
 
 Generated from the simulator, not downloaded from a corpus:
 
-The current configs use the shared `ground_plane_v1` semantics: horizontal motion
-uses yaw only, world Y is vertical, and pitch changes viewing direction without
-changing a later forward/strafe direction. See
-`view_suite/envs/GROUND_PLANE_ACTION_SPACE.md`.
+The default configs retain the released camera-local action semantics. The optional
+`ground_plane_v1` corpus uses yaw-only horizontal motion, world Y as vertical, and
+pitch-only viewing changes; enable it together with `ground_plane_movement: true`.
+See `view_suite/envs/GROUND_PLANE_ACTION_SPACE.md`.
 
 ```bash
 export VIEWSUITE_ROOT=$(pwd)

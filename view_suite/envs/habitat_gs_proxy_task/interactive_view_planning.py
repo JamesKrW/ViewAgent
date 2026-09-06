@@ -4,16 +4,12 @@ The task is to recover the 6-DoF camera pose of a target image. Every
 observation is self-contained: it repeats the target image, a top-down reference
 with its known pose, and every explored image/pose/action transition so far.
 
-The navigation controls intentionally match Habitat-GS' interactive viewer:
-
-    W/S             move forward/backward on the horizontal plane
-    A/D             strafe left/right on the horizontal plane
-    Z/X             move up/down along world Y
-    arrow_left/right turn left/right (yaw)
-    arrow_up/down    look up/down (pitch)
+The model-facing navigation controls use the same semantic names as the other
+ViewSuite environments: ``move_forward``, ``turn_left``, ``look_up``, and so on.
+The local interactive viewer still accepts W/A/S/D/Z/X and arrow keys as aliases.
 
 A turn is either a ``|``-separated navigation batch or exactly one
-``submit_pose(tx,ty,tz,rx,ry,rz)`` action. Navigation and submission cannot be
+``answer(tx,ty,tz,rx,ry,rz)`` action. Navigation and submission cannot be
 mixed. Running this file directly starts a shell UI and saves all images plus a
 JSON trajectory under ``--save-dir``.
 """
@@ -62,53 +58,65 @@ class ExplorationFrame:
 
 
 class HabitatGSInteractiveViewPlanning(GymProxyTool):
-    """Self-contained/no-concat IVP environment with viewer-style controls."""
+    """Self-contained/no-concat IVP with the shared ViewSuite action vocabulary."""
 
     NAVIGATION_ACTIONS: tuple[str, ...] = (
-        "w",
-        "s",
-        "a",
-        "d",
-        "z",
-        "x",
-        "arrow_left",
-        "arrow_right",
-        "arrow_up",
-        "arrow_down",
+        "move_forward",
+        "move_backward",
+        "move_right",
+        "move_left",
+        "move_up",
+        "move_down",
+        "turn_left",
+        "turn_right",
+        "look_up",
+        "look_down",
     )
-    SUBMIT_ACTION = "submit_pose"
+    SUBMIT_ACTION = "answer"
 
     _ARROW_ALIASES: ClassVar[dict[str, str]] = {
-        "←": "arrow_left",
-        "⬅": "arrow_left",
-        "→": "arrow_right",
-        "➡": "arrow_right",
-        "↑": "arrow_up",
-        "⬆": "arrow_up",
-        "↓": "arrow_down",
-        "⬇": "arrow_down",
+        "←": "turn_left",
+        "⬅": "turn_left",
+        "→": "turn_right",
+        "➡": "turn_right",
+        "↑": "look_up",
+        "⬆": "look_up",
+        "↓": "look_down",
+        "⬇": "look_down",
+    }
+    _LEGACY_ACTION_ALIASES: ClassVar[dict[str, str]] = {
+        "w": "move_forward",
+        "s": "move_backward",
+        "d": "move_right",
+        "a": "move_left",
+        "z": "move_up",
+        "x": "move_down",
+        "arrow_left": "turn_left",
+        "arrow_right": "turn_right",
+        "arrow_up": "look_up",
+        "arrow_down": "look_down",
+        "submit_pose": "answer",
     }
     _ENGINE_ACTIONS: ClassVar[dict[str, str]] = {
-        "w": "w",
-        "s": "s",
-        "a": "a",
-        "d": "d",
-        "z": "y",
-        "x": "h",
-        "arrow_left": "q",
-        "arrow_right": "e",
-        "arrow_up": "r",
-        "arrow_down": "f",
+        "move_forward": "w",
+        "move_backward": "s",
+        "move_right": "d",
+        "move_left": "a",
+        "move_up": "y",
+        "move_down": "h",
+        "turn_left": "q",
+        "turn_right": "e",
+        "look_up": "r",
+        "look_down": "f",
     }
 
     def __init__(self, env_config: dict[str, Any]):
-        # This task always starts at init_view and exposes only the compact action
-        # space, regardless of the legacy GymProxyTool defaults.
+        # This task always starts at init_view and exposes the same named action-only
+        # vocabulary as the other ViewSuite IVP environments.
         config = dict(env_config)
         config["action_only_mode"] = True
-        # This V2 task has always documented z/x as world-Y and horizontal body
-        # motion. Keep that behavior as its default while still exposing the knob.
-        config.setdefault("ground_plane_movement", True)
+        # Preserve the repository-wide legacy default; ground_plane_v1 is opt-in.
+        config.setdefault("ground_plane_movement", False)
         config.setdefault("format", "eval_mode")
         config.setdefault("use_example_in_sys_prompt", False)
         super().__init__(config)
@@ -135,12 +143,10 @@ class HabitatGSInteractiveViewPlanning(GymProxyTool):
     async def system_prompt(self) -> dict[str, Any]:
         format_instruction = get_format_instruction(
             self.format,
-            action_example="w|arrow_left|d  OR  submit_pose(tx,ty,tz,rx,ry,rz)",
-        )
-        vertical_rule = (
-            "- z / x: move vertically along world +Y / -Y; pitch has no effect."
-            if self.ground_plane_movement
-            else "- z / x: move along sensor-local up / down; this direction tilts with pitch."
+            action_example=(
+                "move_forward|turn_left|move_right  OR  "
+                "answer(tx,ty,tz,rx,ry,rz)"
+            ),
         )
         text = f"""
 You are controlling a camera in a Habitat-GS scene.
@@ -158,21 +164,13 @@ Every turn is self-contained. It contains:
    pose, and consecutive images are connected by the action batch that moved
    between them.
 
-NAVIGATION ACTIONS
-- w / s: move forward / backward using yaw only on the horizontal XZ plane;
-  looking up/down never changes the movement direction or camera height.
-- a / d: strafe left / right, perpendicular to that heading on the XZ plane.
-{vertical_rule}
-- arrow_left / arrow_right: turn left / right (yaw).
-- arrow_up / arrow_down: look up / down (pitch).
+{self._tool_instruction}
 
 TURN RULES
 - A navigation turn contains 1 to {self.max_actions_per_turn} navigation actions,
   separated by |. The environment renders once after the whole batch.
-- A submission turn contains exactly one action:
-  submit_pose(tx,ty,tz,rx,ry,rz)
-- Never mix navigation actions and submit_pose in the same turn.
-- submit_pose is terminal, whether the estimate is correct or incorrect.
+- A submission turn contains exactly one answer(...) action.
+- Never mix navigation actions and answer(...) in the same turn.
 - You have at most {self.max_turns} turns.
 
 OUTPUT FORMAT
@@ -366,6 +364,10 @@ OUTPUT FORMAT
         actions_ok, actions = parse_actions(formatted["actions_blob"])
         if not actions_ok or not actions:
             return False, [], "action block is empty or has invalid syntax"
+        actions = [
+            ParsedAction(self._LEGACY_ACTION_ALIASES.get(action.name, action.name), action.arg)
+            for action in actions
+        ]
         return True, actions, ""
 
     def _validate_batch(
@@ -376,10 +378,10 @@ OUTPUT FORMAT
         ]
         if submissions:
             if len(actions) != 1:
-                return None, None, "submit_pose must be the only action in its turn"
+                return None, None, "answer must be the only action in its turn"
             arg = submissions[0].arg
             if not isinstance(arg, str):
-                return None, None, "submit_pose requires 6 numeric arguments"
+                return None, None, "answer requires 6 numeric arguments"
             pose = parse_get_view_arg_deg(arg)
             if (
                 pose is None
@@ -389,7 +391,7 @@ OUTPUT FORMAT
                 return (
                     None,
                     None,
-                    "submit_pose requires 6 finite numbers: tx,ty,tz,rx,ry,rz",
+                    "answer requires 6 finite numbers: tx,ty,tz,rx,ry,rz",
                 )
             return "submit", tuple(float(x) for x in pose), None
 
@@ -547,22 +549,23 @@ OUTPUT FORMAT
 # ---------------------------------------------------------------------------
 
 _SHELL_ALIASES = {
-    "left": "arrow_left",
-    "right": "arrow_right",
-    "up": "arrow_up",
-    "down": "arrow_down",
-    "arrowleft": "arrow_left",
-    "arrowright": "arrow_right",
-    "arrowup": "arrow_up",
-    "arrowdown": "arrow_down",
+    "left": "turn_left",
+    "right": "turn_right",
+    "up": "look_up",
+    "down": "look_down",
+    "arrowleft": "turn_left",
+    "arrowright": "turn_right",
+    "arrowup": "look_up",
+    "arrowdown": "look_down",
+    **HabitatGSInteractiveViewPlanning._LEGACY_ACTION_ALIASES,
     **HabitatGSInteractiveViewPlanning._ARROW_ALIASES,
 }
 
 _TERMINAL_ARROW_KEYS = {
-    "\x1b[D": "arrow_left",
-    "\x1b[C": "arrow_right",
-    "\x1b[A": "arrow_up",
-    "\x1b[B": "arrow_down",
+    "\x1b[D": "turn_left",
+    "\x1b[C": "turn_right",
+    "\x1b[A": "look_up",
+    "\x1b[B": "look_down",
 }
 
 
@@ -594,7 +597,7 @@ def _shell_command_to_response(
         numbers = ",".join(
             part for part in re.split(r"[\s,]+", numbers.strip()) if part
         )
-        return _wrap_action_blob(f"submit_pose({numbers})", format_name), ""
+        return _wrap_action_blob(f"answer({numbers})", format_name), ""
 
     raw = command.lower().strip()
     for glyph, name in HabitatGSInteractiveViewPlanning._ARROW_ALIASES.items():

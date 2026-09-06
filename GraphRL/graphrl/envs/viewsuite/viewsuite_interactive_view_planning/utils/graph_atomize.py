@@ -351,8 +351,7 @@ def atomize_graph(builder, graph, images_dir, cfg: Dict[str, Any]) -> Dict[str, 
 
     cfg keys: corpus(scannet), client_url (required), scannet_root, client_origin,
     corpus_dir, step_translation(0.5), step_rotation(30.0), size(512),
-    render_chunk(32), ground_plane_movement (False; True for Habitat-GS to
-    match its compact IVP runtime).
+    render_chunk(32), ground_plane_movement (False).
     """
     g = graph._g
     corpus = str(cfg.get("corpus", "scannet"))
@@ -362,9 +361,7 @@ def atomize_graph(builder, graph, images_dir, cfg: Dict[str, Any]) -> Dict[str, 
     adapter = _ADAPTERS[corpus]
     step_t = float(cfg.get("step_translation", 0.5))
     step_r = float(cfg.get("step_rotation", 30.0))
-    ground_plane_movement = bool(
-        cfg.get("ground_plane_movement", corpus == "habitat_gs")
-    )
+    ground_plane_movement = bool(cfg.get("ground_plane_movement", False))
     scene_steps = _scene_step_map(cfg.get("corpus_dir"))
     size = int(cfg.get("size", 512))
     chunk = int(cfg.get("render_chunk", 32))
