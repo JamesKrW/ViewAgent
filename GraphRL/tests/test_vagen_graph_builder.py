@@ -133,3 +133,59 @@ def test_habitat_gs_uses_structural_scene_id_when_prompt_hides_it(tmp_path):
     assert len(transitions) == 1
     assert transitions[0][0].state["scene_id"] == "habitat_scene"
     assert transitions[0][2].state["scene_id"] == "habitat_scene"
+
+
+def test_habitat_gs_concat_uses_current_view_pose_and_image(tmp_path):
+    image_dir = tmp_path / "image_1" / "images_0"
+    image_dir.mkdir(parents=True)
+    for index in range(4):
+        (image_dir / f"{index}.png").write_bytes(b"png")
+
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                "TARGET VIEW (camera pose unknown)\n<image>\n"
+                "TOP-DOWN REFERENCE\n<image>\n"
+                "camera pose: [tx=9, ty=9, tz=9, rx=90, ry=0, rz=0]\n"
+                "CURRENT VIEW (initial)\n<image>\n"
+                "camera pose: [tx=0, ty=1, tz=2, rx=0, ry=0, rz=0]"
+            ),
+        },
+        {"role": "assistant", "content": "<action>move_forward</action>"},
+        {
+            "role": "user",
+            "content": (
+                "CURRENT VIEW\n<image>\n"
+                "camera pose: [tx=0, ty=1, tz=2.5, rx=0, ry=0, rz=0]"
+            ),
+        },
+    ]
+
+    transitions = InteractiveViewPlanningGraphBuilder({}).traj_to_transitions(
+        messages,
+        tmp_path,
+        1,
+        0,
+        episode_data={"rollout_metadata": {"scene_id": "habitat_scene"}},
+    )
+
+    assert len(transitions) == 1
+    assert transitions[0][0].state["pose"] == {
+        "tx": 0.0,
+        "ty": 1.0,
+        "tz": 2.0,
+        "rx": 0.0,
+        "ry": 0.0,
+        "rz": 0.0,
+    }
+    assert transitions[0][2].state["pose"] == {
+        "tx": 0.0,
+        "ty": 1.0,
+        "tz": 2.5,
+        "rx": 0.0,
+        "ry": 0.0,
+        "rz": 0.0,
+    }
+    assert transitions[0][0].source_images == [str(image_dir / "2.png")]
+    assert transitions[0][2].source_images == [str(image_dir / "3.png")]

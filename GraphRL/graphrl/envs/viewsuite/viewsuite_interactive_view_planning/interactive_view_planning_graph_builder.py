@@ -451,13 +451,20 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
             content = msg["content"]
 
             if role == "user":
-                # Habitat-GS repeats TARGET, TOP-DOWN and the full explored
-                # trajectory every turn.  Its current state is therefore the
-                # final trajectory pose/image, not the first pose/image (which
-                # belongs to the top-down reference).  Legacy ViewSuite prompts
-                # retain their original first-pose/first-image behaviour.
+                # Habitat-GS supports two observation protocols.  Self-contained
+                # no-concat observations repeat the full trajectory, so the current
+                # state is the final pose/image.  Concat observations label exactly
+                # one CURRENT VIEW; on reset it follows target and top-down images,
+                # while later turns contain only that current image.
                 self_contained = "EXPLORED TRAJECTORY" in content
-                pose = _parse_pose(content, last=self_contained)
+                current_marker = re.search(
+                    r"CURRENT VIEW(?:\s*\(initial\))?\s*<image>",
+                    content,
+                    re.IGNORECASE,
+                )
+                pose = _parse_pose(
+                    content, last=self_contained or current_marker is not None
+                )
                 num_images = _count_images(content)
                 if pose is None:
                     global_img_idx += num_images
@@ -468,12 +475,11 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
                     if self_contained:
                         obs_img_idx = global_img_idx + num_images - 1
                     else:
-                        # Reset prompts name reference images in display order.
-                        # Select the image explicitly labelled as the initial
-                        # view; current prompts order them target, initial,
-                        # top-down rather than placing the initial view first.
-                        initial_marker = re.search(
-                            r"initial view\s*<image>", content, re.IGNORECASE,
+                        # Reset prompts name reference images in display order. The
+                        # concat Habitat-GS prompt labels CURRENT VIEW explicitly;
+                        # legacy prompts label it as the initial view.
+                        initial_marker = current_marker or re.search(
+                            r"initial view\s*<image>", content, re.IGNORECASE
                         )
                         obs_img_idx = global_img_idx
                         if initial_marker:

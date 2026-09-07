@@ -16,6 +16,7 @@ envs:
       render_backend: client
       max_turns: 10
       action_only_mode: true
+      observation_mode: concat
       allow_rotate: false
       ground_plane_movement: false
       obs_format_bonus_reward: 0.01

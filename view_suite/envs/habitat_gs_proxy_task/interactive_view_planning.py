@@ -1,8 +1,16 @@
-"""No-concat interactive view planning on Habitat-GS.
+"""Interactive view planning on Habitat-GS.
 
 The task is to recover the 6-DoF camera pose of a target image. Every
-observation is self-contained: it repeats the target image, a top-down reference
-with its known pose, and every explored image/pose/action transition so far.
+environment instance has an explicit observation protocol:
+
+``concat``
+    The opening observation contains the target, top-down reference and initial
+    view. Later observations contain only the current view. The caller owns the
+    conversation history.
+
+``no_concat``
+    Every observation is self-contained: it repeats the target image, top-down
+    reference and complete explored trajectory.
 
 The model-facing navigation controls use the same semantic names as the other
 ViewSuite environments: ``move_forward``, ``turn_left``, ``look_up``, and so on.
@@ -58,7 +66,11 @@ class ExplorationFrame:
 
 
 class HabitatGSInteractiveViewPlanning(GymProxyTool):
-    """Self-contained/no-concat IVP with the shared ViewSuite action vocabulary."""
+    """Habitat-GS IVP with selectable concat/no-concat observations."""
+
+    OBSERVATION_MODES: ClassVar[frozenset[str]] = frozenset(
+        {"concat", "no_concat"}
+    )
 
     NAVIGATION_ACTIONS: tuple[str, ...] = (
         "move_forward",
@@ -121,6 +133,16 @@ class HabitatGSInteractiveViewPlanning(GymProxyTool):
         config.setdefault("use_example_in_sys_prompt", False)
         super().__init__(config)
 
+        observation_mode = str(config.get("observation_mode", "concat")).strip()
+        observation_mode = observation_mode.lower().replace("-", "_")
+        if observation_mode not in self.OBSERVATION_MODES:
+            allowed = ", ".join(sorted(self.OBSERVATION_MODES))
+            raise ValueError(
+                f"observation_mode must be one of {{{allowed}}}, "
+                f"got {observation_mode!r}"
+            )
+        self.observation_mode = observation_mode
+
         self.max_actions_per_turn = int(config.get("max_actions_per_turn", 4))
         if self.max_actions_per_turn < 1:
             raise ValueError("max_actions_per_turn must be >= 1")
@@ -148,6 +170,26 @@ class HabitatGSInteractiveViewPlanning(GymProxyTool):
                 "answer(tx,ty,tz,rx,ry,rz)"
             ),
         )
+        if self.observation_mode == "concat":
+            observation_contract = """
+The opening observation contains:
+1. the TARGET VIEW (pose hidden),
+2. a TOP-DOWN REFERENCE and its camera pose,
+3. the initial CURRENT VIEW and its exact camera pose.
+
+Every later observation contains only the latest CURRENT VIEW and its exact
+camera pose. Earlier views and actions remain in the conversation history.
+""".strip()
+        else:
+            observation_contract = """
+Every turn is self-contained. It contains:
+1. the TARGET VIEW (pose hidden),
+2. a TOP-DOWN REFERENCE and its camera pose,
+3. the complete EXPLORED TRAJECTORY. Each explored image has its exact camera
+   pose, and consecutive images are connected by the action batch that moved
+   between them.
+""".strip()
+
         text = f"""
 You are controlling a camera in a Habitat-GS scene.
 
@@ -157,12 +199,7 @@ submit that target camera pose as [tx, ty, tz, rx, ry, rz], where translation is
 in meters and rotation is c2w Euler XYZ in degrees.
 
 OBSERVATION
-Every turn is self-contained. It contains:
-1. the TARGET VIEW (pose hidden),
-2. a TOP-DOWN REFERENCE and its camera pose,
-3. the complete EXPLORED TRAJECTORY. Each explored image has its exact camera
-   pose, and consecutive images are connected by the action batch that moved
-   between them.
+{observation_contract}
 
 {self._tool_instruction}
 
@@ -223,7 +260,7 @@ OUTPUT FORMAT
         return values  # type: ignore[return-value]
 
     def _observation_payload(
-        self, status: str | None = None
+        self, status: str | None = None, *, initial: bool = False
     ) -> tuple[str, list[Image.Image]]:
         if not self._episode_images or not self._trajectory:
             raise RuntimeError("Call reset() before building an IVP observation")
@@ -234,43 +271,73 @@ OUTPUT FORMAT
 
         lines: list[str] = []
         images: list[Image.Image] = []
-        lines.extend(
-            [
-                "TARGET VIEW (camera pose unknown)",
-                "<image>",
-                "",
-                "TOP-DOWN REFERENCE",
-                "<image>",
-                "camera pose: " + fmt_pose6_deg(topdown["c2w_se3_deg"]),
-                "",
-                "EXPLORED TRAJECTORY",
-            ]
-        )
-        images.extend(
-            [
-                self._episode_images["target_view"],
-                self._episode_images["top_down_view"],
-            ]
-        )
-
-        for index, frame in enumerate(self._trajectory):
-            if index > 0:
-                actions = " | ".join(frame.incoming_actions or ())
-                lines.append(f"E{index - 1} --[{actions}]--> E{index}")
-            label = " (initial view)" if index == 0 else ""
+        if self.observation_mode == "concat":
+            if initial:
+                lines.extend(
+                    [
+                        "TARGET VIEW (camera pose unknown)",
+                        "<image>",
+                        "",
+                        "TOP-DOWN REFERENCE",
+                        "<image>",
+                        "camera pose: " + fmt_pose6_deg(topdown["c2w_se3_deg"]),
+                        "",
+                    ]
+                )
+                images.extend(
+                    [
+                        self._episode_images["target_view"],
+                        self._episode_images["top_down_view"],
+                    ]
+                )
+            current = self._trajectory[-1]
+            current_label = "CURRENT VIEW (initial)" if initial else "CURRENT VIEW"
             lines.extend(
                 [
-                    f"E{index}{label}",
+                    current_label,
                     "<image>",
-                    "camera pose: " + fmt_pose6_deg(frame.pose),
+                    "camera pose: " + fmt_pose6_deg(current.pose),
                 ]
             )
-            images.append(frame.image)
+            images.append(current.image)
+        else:
+            lines.extend(
+                [
+                    "TARGET VIEW (camera pose unknown)",
+                    "<image>",
+                    "",
+                    "TOP-DOWN REFERENCE",
+                    "<image>",
+                    "camera pose: " + fmt_pose6_deg(topdown["c2w_se3_deg"]),
+                    "",
+                    "EXPLORED TRAJECTORY",
+                ]
+            )
+            images.extend(
+                [
+                    self._episode_images["target_view"],
+                    self._episode_images["top_down_view"],
+                ]
+            )
+
+            for index, frame in enumerate(self._trajectory):
+                if index > 0:
+                    actions = " | ".join(frame.incoming_actions or ())
+                    lines.append(f"E{index - 1} --[{actions}]--> E{index}")
+                label = " (initial view)" if index == 0 else ""
+                lines.extend(
+                    [
+                        f"E{index}{label}",
+                        "<image>",
+                        "camera pose: " + fmt_pose6_deg(frame.pose),
+                    ]
+                )
+                images.append(frame.image)
 
         pos_thr, ang_thr = self._current_thresholds()
-        # Keep per-turn text after the stable target/reference/history prefix. In
-        # no-concat rollouts, each new observation can then reuse the cached prefix
-        # containing every frame that was already explored on the previous turn.
+        # Keep per-turn state after the visual payload. In no-concat mode this also
+        # preserves a stable target/reference/history prefix; concat mode emits only
+        # the latest frame after the opening observation.
         if status:
             lines.extend(["", "LAST ACTION RESULT", status])
         lines.extend(
@@ -303,8 +370,10 @@ OUTPUT FORMAT
         )
         return float(position), float(rotation)
 
-    def _full_observation(self, status: str | None = None) -> dict[str, Any]:
-        text, images = self._observation_payload(status=status)
+    def _full_observation(
+        self, status: str | None = None, *, initial: bool = False
+    ) -> dict[str, Any]:
+        text, images = self._observation_payload(status=status, initial=initial)
         return self._obs(text, images)
 
     def _metric_snapshot(self) -> dict[str, Any]:
@@ -345,7 +414,7 @@ OUTPUT FORMAT
             )
         )
         self.is_format_correct = True
-        return self._full_observation(), self._with_metrics(info)
+        return self._full_observation(initial=True), self._with_metrics(info)
 
     @classmethod
     def _replace_arrow_glyphs(cls, text: str) -> str:
@@ -727,7 +796,7 @@ def _save_demo_state(
 def _demo_parser() -> argparse.ArgumentParser:
     repo_root = Path(__file__).resolve().parents[3]
     parser = argparse.ArgumentParser(
-        description="Interactively inspect the no-concat Habitat-GS IVP environment."
+        description="Interactively inspect the Habitat-GS IVP environment."
     )
     parser.add_argument(
         "--jsonl",
@@ -749,6 +818,12 @@ def _demo_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-turns", type=int, default=10)
     parser.add_argument("--max-actions-per-turn", type=int, default=4)
+    parser.add_argument(
+        "--observation-mode",
+        choices=tuple(sorted(HabitatGSInteractiveViewPlanning.OBSERVATION_MODES)),
+        default="concat",
+        help="Emit only the current view after reset, or a self-contained trajectory.",
+    )
     parser.add_argument(
         "--image-size",
         type=int,
@@ -800,6 +875,7 @@ async def _run_interactive_demo(args: argparse.Namespace) -> int:
         "format": args.format,
         "max_turns": args.max_turns,
         "max_actions_per_turn": args.max_actions_per_turn,
+        "observation_mode": args.observation_mode,
         "action_only_mode": True,
         "use_example_in_sys_prompt": False,
     }

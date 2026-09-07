@@ -20,6 +20,7 @@ envs:
       format_reward: 0.0
       give_answer_reward: 0.1
       action_only_mode: true
+      observation_mode: concat
       allow_rotate: false
       ground_plane_movement: false
       # Per-turn bonus when the model emits the reasoning format
