@@ -384,41 +384,80 @@ class _ThreadControllerPool:
         - We lock the slot for the whole request, so one controller is used by one thread at a time.
         """
         with self._slot_locks[slot_idx]:
-            slot = self._ensure_slot_ready_for_request(slot_idx, scene_id, width, height, fov)
-            slot.last_used = time.monotonic()
-
-            out: List[bytes] = []
-            for i, task in enumerate(tasks):
-                pose = task.get("pose")
-                if not pose or "position" not in pose or "rotation" not in pose:
-                    LOGGER.warning("[AI2ThorRender/Hybrid][P] Invalid pose for task #%d; transparent image", i)
-                    out.append(_transparent_png(self.default_width, self.default_height))
-                    continue
-
-                # Per-task overrides (kept as requested)
-                w, h, f = _task_params(task, self.default_width, self.default_height, self.default_fov)
-
-                # If per-task params differ from current slot params, RECONSTRUCT (rare)
-                if slot.width != w or slot.height != h or float(slot.fov) != float(f):
-                    self._reconstruct_slot(slot, slot_idx, scene_id, w, h, f)
-
-                # Step and encode
-                slot.controller.step(
-                    action="UpdateThirdPartyCamera",
-                    thirdPartyCameraId=0,
-                    position=pose["position"],
-                    rotation=pose["rotation"],
-                    fieldOfView=float(slot.fov),
+            try:
+                return self._render_blocking_once(
+                    slot_idx, scene_id, tasks, width, height, fov
+                )
+            except Exception:
+                # Unity can exit underneath a long-lived Controller while its
+                # Python object remains cached.  The next reset/step then fails
+                # with errors such as ``ValueError: write to closed file``.
+                # Rendering is idempotent, so rebuild this slot and retry the
+                # request once before surfacing the failure to the client.
+                self._metrics["controller_recover"] += 1
+                LOGGER.exception(
+                    "[AI2ThorRender/Hybrid][P] slot=%d became unusable; "
+                    "reconstructing and retrying once",
+                    slot_idx,
+                )
+                slot = self.slots[slot_idx]
+                if slot is None:
+                    self.slots[slot_idx] = self._create_slot(
+                        slot_idx, scene_id, width, height, fov
+                    )
+                else:
+                    self._reconstruct_slot(
+                        slot, slot_idx, scene_id, width, height, fov
+                    )
+                return self._render_blocking_once(
+                    slot_idx, scene_id, tasks, width, height, fov
                 )
 
-                ev = slot.controller.last_event
-                if not ev.third_party_camera_frames:
-                    raise RuntimeError("No third party camera frames available")
+    def _render_blocking_once(
+        self,
+        slot_idx: int,
+        scene_id: str,
+        tasks: List[Dict[str, Any]],
+        width: int,
+        height: int,
+        fov: float,
+    ) -> List[bytes]:
+        """Render once using the selected slot; caller owns the slot lock."""
+        slot = self._ensure_slot_ready_for_request(slot_idx, scene_id, width, height, fov)
+        slot.last_used = time.monotonic()
 
-                frame = ev.third_party_camera_frames[0]
-                out.append(_encode_rgb_to_png_bytes(frame))
+        out: List[bytes] = []
+        for i, task in enumerate(tasks):
+            pose = task.get("pose")
+            if not pose or "position" not in pose or "rotation" not in pose:
+                LOGGER.warning("[AI2ThorRender/Hybrid][P] Invalid pose for task #%d; transparent image", i)
+                out.append(_transparent_png(self.default_width, self.default_height))
+                continue
 
-            return out
+            # Per-task overrides (kept as requested)
+            w, h, f = _task_params(task, self.default_width, self.default_height, self.default_fov)
+
+            # If per-task params differ from current slot params, RECONSTRUCT (rare)
+            if slot.width != w or slot.height != h or float(slot.fov) != float(f):
+                self._reconstruct_slot(slot, slot_idx, scene_id, w, h, f)
+
+            # Step and encode
+            slot.controller.step(
+                action="UpdateThirdPartyCamera",
+                thirdPartyCameraId=0,
+                position=pose["position"],
+                rotation=pose["rotation"],
+                fieldOfView=float(slot.fov),
+            )
+
+            ev = slot.controller.last_event
+            if not ev.third_party_camera_frames:
+                raise RuntimeError("No third party camera frames available")
+
+            frame = ev.third_party_camera_frames[0]
+            out.append(_encode_rgb_to_png_bytes(frame))
+
+        return out
 
     async def render(self, scene_id: str, tasks: List[Dict[str, Any]]) -> List[bytes]:
         """Async entry: schedule blocking render in thread pool."""
