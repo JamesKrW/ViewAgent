@@ -11,7 +11,7 @@ VAL_CONFIG="${HABITAT_GS_VAL_CONFIG:-val.yaml}"
 [[ "${TRAIN_CONFIG}" = /* ]] || TRAIN_CONFIG="${SCRIPT_DIR}/${TRAIN_CONFIG}"
 [[ "${VAL_CONFIG}" = /* ]] || VAL_CONFIG="${SCRIPT_DIR}/${VAL_CONFIG}"
 
-EXPERIMENT_DIR="${PWD}/exps/viewagent/habitat_gs_ivp_relative_earlystop"
+EXPERIMENT_DIR="${GRAPHRL_EXPERIMENT_DIR:-${PWD}/exps/viewagent/habitat_gs_ivp_relative_earlystop}"
 N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-8}"
 SFT_N_GPUS="${SFT_N_GPUS:-${N_GPUS_PER_NODE}}"
 mkdir -p "${EXPERIMENT_DIR}"
