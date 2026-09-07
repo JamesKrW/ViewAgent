@@ -19,6 +19,7 @@ DATASET_DIR="${VIEWSUITE_DATASET_DIR:-${VIEWSUITE_ROOT}/data/viewsuite_15k_habit
 EXPERIMENT_NAME="${EXP_NAME:-viewsuite_scannet_habitat_nograph_budgetmatch_512}"
 EXPERIMENT_DIR="${GRAPHRL_EXPERIMENT_DIR:-${PWD}/exps/viewagent/${EXPERIMENT_NAME}}"
 N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-8}"
+N_NODES="${N_NODES:-1}"
 SFT_N_GPUS="${SFT_N_GPUS:-${N_GPUS_PER_NODE}}"
 mkdir -p "${EXPERIMENT_DIR}"
 LOG_FILE="${EXPERIMENT_DIR}/pipeline_$(date +%Y%m%d_%H%M%S).log"
@@ -38,7 +39,7 @@ fi
     general_overrides.rl.hydra_overrides.data.val_files="${VAL_CONFIG}" \
     general_overrides.rl.hydra_overrides.algorithm.adv_estimator=default_gae \
     general_overrides.rl.hydra_overrides.trainer.n_gpus_per_node="${N_GPUS_PER_NODE}" \
-    general_overrides.rl.hydra_overrides.trainer.nnodes=1 \
+    general_overrides.rl.hydra_overrides.trainer.nnodes="${N_NODES}" \
     general_overrides.sft.n_gpus="${SFT_N_GPUS}" \
     general_overrides.traj_to_sft.module=graphrl.envs.viewsuite.viewsuite_interactive_view_planning_nograph.NoGraphInteractiveViewPlanningTrajToSFT \
     general_overrides.traj_to_sft.viewsuite_15k_dir="${DATASET_DIR}" \

@@ -13,6 +13,7 @@ VAL_CONFIG="${HABITAT_GS_VAL_CONFIG:-val.yaml}"
 
 EXPERIMENT_DIR="${GRAPHRL_EXPERIMENT_DIR:-${PWD}/exps/viewagent/habitat_gs_ivp_relative_earlystop}"
 N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-8}"
+N_NODES="${N_NODES:-1}"
 SFT_N_GPUS="${SFT_N_GPUS:-${N_GPUS_PER_NODE}}"
 mkdir -p "${EXPERIMENT_DIR}"
 LOG_FILE="${EXPERIMENT_DIR}/pipeline_$(date +%Y%m%d_%H%M%S).log"
@@ -25,7 +26,7 @@ python -m graphrl.main_adaptive \
     general_overrides.rl.hydra_overrides.data.train_files="${TRAIN_CONFIG}" \
     general_overrides.rl.hydra_overrides.data.val_files="${VAL_CONFIG}" \
     general_overrides.rl.hydra_overrides.trainer.n_gpus_per_node="${N_GPUS_PER_NODE}" \
-    general_overrides.rl.hydra_overrides.trainer.nnodes=1 \
+    general_overrides.rl.hydra_overrides.trainer.nnodes="${N_NODES}" \
     general_overrides.sft.n_gpus="${SFT_N_GPUS}" \
     'general_overrides.traj_to_sft.generators=[multi_turn_action_gen,view_difference,view_difference_mcq]' \
     experiment_dir="${EXPERIMENT_DIR}" \
