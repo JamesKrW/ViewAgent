@@ -1,19 +1,23 @@
-"""No-concat interactive view planning on Habitat-GS.
+"""Interactive view planning on Habitat-GS.
 
 The task is to recover the 6-DoF camera pose of a target image. Every
-observation is self-contained: it repeats the target image, a top-down reference
-with its known pose, and every explored image/pose/action transition so far.
+environment instance has an explicit observation protocol:
 
-The navigation controls intentionally match Habitat-GS' interactive viewer:
+``concat``
+    The opening observation contains the target, top-down reference and initial
+    view. Later observations contain only the current view. The caller owns the
+    conversation history.
 
-    W/S             move forward/backward on the horizontal plane
-    A/D             strafe left/right on the horizontal plane
-    Z/X             move up/down along world Y
-    arrow_left/right turn left/right (yaw)
-    arrow_up/down    look up/down (pitch)
+``no_concat``
+    Every observation is self-contained: it repeats the target image, top-down
+    reference and complete explored trajectory.
+
+The model-facing navigation controls use the same semantic names as the other
+ViewSuite environments: ``move_forward``, ``turn_left``, ``look_up``, and so on.
+The local interactive viewer still accepts W/A/S/D/Z/X and arrow keys as aliases.
 
 A turn is either a ``|``-separated navigation batch or exactly one
-``submit_pose(tx,ty,tz,rx,ry,rz)`` action. Navigation and submission cannot be
+``answer(tx,ty,tz,rx,ry,rz)`` action. Navigation and submission cannot be
 mixed. Running this file directly starts a shell UI and saves all images plus a
 JSON trajectory under ``--save-dir``.
 """
@@ -62,51 +66,82 @@ class ExplorationFrame:
 
 
 class HabitatGSInteractiveViewPlanning(GymProxyTool):
-    """Self-contained/no-concat IVP environment with viewer-style controls."""
+    """Habitat-GS IVP with selectable concat/no-concat observations."""
+
+    OBSERVATION_MODES: ClassVar[frozenset[str]] = frozenset(
+        {"concat", "no_concat"}
+    )
 
     NAVIGATION_ACTIONS: tuple[str, ...] = (
-        "w",
-        "s",
-        "a",
-        "d",
-        "z",
-        "x",
-        "arrow_left",
-        "arrow_right",
-        "arrow_up",
-        "arrow_down",
+        "move_forward",
+        "move_backward",
+        "move_right",
+        "move_left",
+        "move_up",
+        "move_down",
+        "turn_left",
+        "turn_right",
+        "look_up",
+        "look_down",
     )
-    SUBMIT_ACTION = "submit_pose"
+    SUBMIT_ACTION = "answer"
 
     _ARROW_ALIASES: ClassVar[dict[str, str]] = {
-        "←": "arrow_left",
-        "⬅": "arrow_left",
-        "→": "arrow_right",
-        "➡": "arrow_right",
-        "↑": "arrow_up",
-        "⬆": "arrow_up",
-        "↓": "arrow_down",
-        "⬇": "arrow_down",
+        "←": "turn_left",
+        "⬅": "turn_left",
+        "→": "turn_right",
+        "➡": "turn_right",
+        "↑": "look_up",
+        "⬆": "look_up",
+        "↓": "look_down",
+        "⬇": "look_down",
+    }
+    _LEGACY_ACTION_ALIASES: ClassVar[dict[str, str]] = {
+        "w": "move_forward",
+        "s": "move_backward",
+        "d": "move_right",
+        "a": "move_left",
+        "z": "move_up",
+        "x": "move_down",
+        "arrow_left": "turn_left",
+        "arrow_right": "turn_right",
+        "arrow_up": "look_up",
+        "arrow_down": "look_down",
+        "submit_pose": "answer",
     }
     _ENGINE_ACTIONS: ClassVar[dict[str, str]] = {
-        "w": "w",
-        "s": "s",
-        "a": "a",
-        "d": "d",
-        "arrow_left": "q",
-        "arrow_right": "e",
-        "arrow_up": "r",
-        "arrow_down": "f",
+        "move_forward": "w",
+        "move_backward": "s",
+        "move_right": "d",
+        "move_left": "a",
+        "move_up": "y",
+        "move_down": "h",
+        "turn_left": "q",
+        "turn_right": "e",
+        "look_up": "r",
+        "look_down": "f",
     }
 
     def __init__(self, env_config: dict[str, Any]):
-        # This task always starts at init_view and exposes only the compact action
-        # space, regardless of the legacy GymProxyTool defaults.
+        # This task always starts at init_view and exposes the same named action-only
+        # vocabulary as the other ViewSuite IVP environments.
         config = dict(env_config)
         config["action_only_mode"] = True
+        # Preserve the repository-wide legacy default; ground_plane_v1 is opt-in.
+        config.setdefault("ground_plane_movement", False)
         config.setdefault("format", "eval_mode")
         config.setdefault("use_example_in_sys_prompt", False)
         super().__init__(config)
+
+        observation_mode = str(config.get("observation_mode", "concat")).strip()
+        observation_mode = observation_mode.lower().replace("-", "_")
+        if observation_mode not in self.OBSERVATION_MODES:
+            allowed = ", ".join(sorted(self.OBSERVATION_MODES))
+            raise ValueError(
+                f"observation_mode must be one of {{{allowed}}}, "
+                f"got {observation_mode!r}"
+            )
+        self.observation_mode = observation_mode
 
         self.max_actions_per_turn = int(config.get("max_actions_per_turn", 4))
         if self.max_actions_per_turn < 1:
@@ -130,8 +165,31 @@ class HabitatGSInteractiveViewPlanning(GymProxyTool):
     async def system_prompt(self) -> dict[str, Any]:
         format_instruction = get_format_instruction(
             self.format,
-            action_example="w|arrow_left|d  OR  submit_pose(tx,ty,tz,rx,ry,rz)",
+            action_example=(
+                "move_forward|turn_left|move_right  OR  "
+                "answer(tx,ty,tz,rx,ry,rz)"
+            ),
         )
+        if self.observation_mode == "concat":
+            observation_contract = """
+The opening observation contains:
+1. the TARGET VIEW (pose hidden),
+2. a TOP-DOWN REFERENCE and its camera pose,
+3. the initial CURRENT VIEW and its exact camera pose.
+
+Every later observation contains only the latest CURRENT VIEW and its exact
+camera pose. Earlier views and actions remain in the conversation history.
+""".strip()
+        else:
+            observation_contract = """
+Every turn is self-contained. It contains:
+1. the TARGET VIEW (pose hidden),
+2. a TOP-DOWN REFERENCE and its camera pose,
+3. the complete EXPLORED TRAJECTORY. Each explored image has its exact camera
+   pose, and consecutive images are connected by the action batch that moved
+   between them.
+""".strip()
+
         text = f"""
 You are controlling a camera in a Habitat-GS scene.
 
@@ -141,27 +199,15 @@ submit that target camera pose as [tx, ty, tz, rx, ry, rz], where translation is
 in meters and rotation is c2w Euler XYZ in degrees.
 
 OBSERVATION
-Every turn is self-contained. It contains:
-1. the TARGET VIEW (pose hidden),
-2. a TOP-DOWN REFERENCE and its camera pose,
-3. the complete EXPLORED TRAJECTORY. Each explored image has its exact camera
-   pose, and consecutive images are connected by the action batch that moved
-   between them.
+{observation_contract}
 
-NAVIGATION ACTIONS
-- w / s: move forward / backward on the horizontal plane.
-- a / d: strafe left / right on the horizontal plane.
-- z / x: move up / down along the world Y axis.
-- arrow_left / arrow_right: turn left / right (yaw).
-- arrow_up / arrow_down: look up / down (pitch).
+{self._tool_instruction}
 
 TURN RULES
 - A navigation turn contains 1 to {self.max_actions_per_turn} navigation actions,
   separated by |. The environment renders once after the whole batch.
-- A submission turn contains exactly one action:
-  submit_pose(tx,ty,tz,rx,ry,rz)
-- Never mix navigation actions and submit_pose in the same turn.
-- submit_pose is terminal, whether the estimate is correct or incorrect.
+- A submission turn contains exactly one answer(...) action.
+- Never mix navigation actions and answer(...) in the same turn.
 - You have at most {self.max_turns} turns.
 
 OUTPUT FORMAT
@@ -214,7 +260,7 @@ OUTPUT FORMAT
         return values  # type: ignore[return-value]
 
     def _observation_payload(
-        self, status: str | None = None
+        self, status: str | None = None, *, initial: bool = False
     ) -> tuple[str, list[Image.Image]]:
         if not self._episode_images or not self._trajectory:
             raise RuntimeError("Call reset() before building an IVP observation")
@@ -225,43 +271,73 @@ OUTPUT FORMAT
 
         lines: list[str] = []
         images: list[Image.Image] = []
-        lines.extend(
-            [
-                "TARGET VIEW (camera pose unknown)",
-                "<image>",
-                "",
-                "TOP-DOWN REFERENCE",
-                "<image>",
-                "camera pose: " + fmt_pose6_deg(topdown["c2w_se3_deg"]),
-                "",
-                "EXPLORED TRAJECTORY",
-            ]
-        )
-        images.extend(
-            [
-                self._episode_images["target_view"],
-                self._episode_images["top_down_view"],
-            ]
-        )
-
-        for index, frame in enumerate(self._trajectory):
-            if index > 0:
-                actions = " | ".join(frame.incoming_actions or ())
-                lines.append(f"E{index - 1} --[{actions}]--> E{index}")
-            label = " (initial view)" if index == 0 else ""
+        if self.observation_mode == "concat":
+            if initial:
+                lines.extend(
+                    [
+                        "TARGET VIEW (camera pose unknown)",
+                        "<image>",
+                        "",
+                        "TOP-DOWN REFERENCE",
+                        "<image>",
+                        "camera pose: " + fmt_pose6_deg(topdown["c2w_se3_deg"]),
+                        "",
+                    ]
+                )
+                images.extend(
+                    [
+                        self._episode_images["target_view"],
+                        self._episode_images["top_down_view"],
+                    ]
+                )
+            current = self._trajectory[-1]
+            current_label = "CURRENT VIEW (initial)" if initial else "CURRENT VIEW"
             lines.extend(
                 [
-                    f"E{index}{label}",
+                    current_label,
                     "<image>",
-                    "camera pose: " + fmt_pose6_deg(frame.pose),
+                    "camera pose: " + fmt_pose6_deg(current.pose),
                 ]
             )
-            images.append(frame.image)
+            images.append(current.image)
+        else:
+            lines.extend(
+                [
+                    "TARGET VIEW (camera pose unknown)",
+                    "<image>",
+                    "",
+                    "TOP-DOWN REFERENCE",
+                    "<image>",
+                    "camera pose: " + fmt_pose6_deg(topdown["c2w_se3_deg"]),
+                    "",
+                    "EXPLORED TRAJECTORY",
+                ]
+            )
+            images.extend(
+                [
+                    self._episode_images["target_view"],
+                    self._episode_images["top_down_view"],
+                ]
+            )
+
+            for index, frame in enumerate(self._trajectory):
+                if index > 0:
+                    actions = " | ".join(frame.incoming_actions or ())
+                    lines.append(f"E{index - 1} --[{actions}]--> E{index}")
+                label = " (initial view)" if index == 0 else ""
+                lines.extend(
+                    [
+                        f"E{index}{label}",
+                        "<image>",
+                        "camera pose: " + fmt_pose6_deg(frame.pose),
+                    ]
+                )
+                images.append(frame.image)
 
         pos_thr, ang_thr = self._current_thresholds()
-        # Keep per-turn text after the stable target/reference/history prefix. In
-        # no-concat rollouts, each new observation can then reuse the cached prefix
-        # containing every frame that was already explored on the previous turn.
+        # Keep per-turn state after the visual payload. In no-concat mode this also
+        # preserves a stable target/reference/history prefix; concat mode emits only
+        # the latest frame after the opening observation.
         if status:
             lines.extend(["", "LAST ACTION RESULT", status])
         lines.extend(
@@ -294,8 +370,10 @@ OUTPUT FORMAT
         )
         return float(position), float(rotation)
 
-    def _full_observation(self, status: str | None = None) -> dict[str, Any]:
-        text, images = self._observation_payload(status=status)
+    def _full_observation(
+        self, status: str | None = None, *, initial: bool = False
+    ) -> dict[str, Any]:
+        text, images = self._observation_payload(status=status, initial=initial)
         return self._obs(text, images)
 
     def _metric_snapshot(self) -> dict[str, Any]:
@@ -336,7 +414,7 @@ OUTPUT FORMAT
             )
         )
         self.is_format_correct = True
-        return self._full_observation(), self._with_metrics(info)
+        return self._full_observation(initial=True), self._with_metrics(info)
 
     @classmethod
     def _replace_arrow_glyphs(cls, text: str) -> str:
@@ -355,6 +433,10 @@ OUTPUT FORMAT
         actions_ok, actions = parse_actions(formatted["actions_blob"])
         if not actions_ok or not actions:
             return False, [], "action block is empty or has invalid syntax"
+        actions = [
+            ParsedAction(self._LEGACY_ACTION_ALIASES.get(action.name, action.name), action.arg)
+            for action in actions
+        ]
         return True, actions, ""
 
     def _validate_batch(
@@ -365,10 +447,10 @@ OUTPUT FORMAT
         ]
         if submissions:
             if len(actions) != 1:
-                return None, None, "submit_pose must be the only action in its turn"
+                return None, None, "answer must be the only action in its turn"
             arg = submissions[0].arg
             if not isinstance(arg, str):
-                return None, None, "submit_pose requires 6 numeric arguments"
+                return None, None, "answer requires 6 numeric arguments"
             pose = parse_get_view_arg_deg(arg)
             if (
                 pose is None
@@ -378,7 +460,7 @@ OUTPUT FORMAT
                 return (
                     None,
                     None,
-                    "submit_pose requires 6 finite numbers: tx,ty,tz,rx,ry,rz",
+                    "answer requires 6 finite numbers: tx,ty,tz,rx,ry,rz",
                 )
             return "submit", tuple(float(x) for x in pose), None
 
@@ -404,12 +486,6 @@ OUTPUT FORMAT
         engine_action = self._ENGINE_ACTIONS.get(action)
         if engine_action is not None:
             self.view_engine.step(engine_action)
-            return
-        if action == "z":
-            self.view_engine.pos[1] += float(self.step_translation)
-            return
-        if action == "x":
-            self.view_engine.pos[1] -= float(self.step_translation)
             return
         raise ValueError(f"Unsupported navigation action: {action}")
 
@@ -542,22 +618,23 @@ OUTPUT FORMAT
 # ---------------------------------------------------------------------------
 
 _SHELL_ALIASES = {
-    "left": "arrow_left",
-    "right": "arrow_right",
-    "up": "arrow_up",
-    "down": "arrow_down",
-    "arrowleft": "arrow_left",
-    "arrowright": "arrow_right",
-    "arrowup": "arrow_up",
-    "arrowdown": "arrow_down",
+    "left": "turn_left",
+    "right": "turn_right",
+    "up": "look_up",
+    "down": "look_down",
+    "arrowleft": "turn_left",
+    "arrowright": "turn_right",
+    "arrowup": "look_up",
+    "arrowdown": "look_down",
+    **HabitatGSInteractiveViewPlanning._LEGACY_ACTION_ALIASES,
     **HabitatGSInteractiveViewPlanning._ARROW_ALIASES,
 }
 
 _TERMINAL_ARROW_KEYS = {
-    "\x1b[D": "arrow_left",
-    "\x1b[C": "arrow_right",
-    "\x1b[A": "arrow_up",
-    "\x1b[B": "arrow_down",
+    "\x1b[D": "turn_left",
+    "\x1b[C": "turn_right",
+    "\x1b[A": "look_up",
+    "\x1b[B": "look_down",
 }
 
 
@@ -589,7 +666,7 @@ def _shell_command_to_response(
         numbers = ",".join(
             part for part in re.split(r"[\s,]+", numbers.strip()) if part
         )
-        return _wrap_action_blob(f"submit_pose({numbers})", format_name), ""
+        return _wrap_action_blob(f"answer({numbers})", format_name), ""
 
     raw = command.lower().strip()
     for glyph, name in HabitatGSInteractiveViewPlanning._ARROW_ALIASES.items():
@@ -719,7 +796,7 @@ def _save_demo_state(
 def _demo_parser() -> argparse.ArgumentParser:
     repo_root = Path(__file__).resolve().parents[3]
     parser = argparse.ArgumentParser(
-        description="Interactively inspect the no-concat Habitat-GS IVP environment."
+        description="Interactively inspect the Habitat-GS IVP environment."
     )
     parser.add_argument(
         "--jsonl",
@@ -741,6 +818,12 @@ def _demo_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-turns", type=int, default=10)
     parser.add_argument("--max-actions-per-turn", type=int, default=4)
+    parser.add_argument(
+        "--observation-mode",
+        choices=tuple(sorted(HabitatGSInteractiveViewPlanning.OBSERVATION_MODES)),
+        default="concat",
+        help="Emit only the current view after reset, or a self-contained trajectory.",
+    )
     parser.add_argument(
         "--image-size",
         type=int,
@@ -792,6 +875,7 @@ async def _run_interactive_demo(args: argparse.Namespace) -> int:
         "format": args.format,
         "max_turns": args.max_turns,
         "max_actions_per_turn": args.max_actions_per_turn,
+        "observation_mode": args.observation_mode,
         "action_only_mode": True,
         "use_example_in_sys_prompt": False,
     }

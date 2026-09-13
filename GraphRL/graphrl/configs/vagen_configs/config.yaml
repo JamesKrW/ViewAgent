@@ -67,23 +67,43 @@ hydra_overrides:
       # at the first generation. vLLM does not care, which is why the default is
       # what it is.
       skip_tokenizer_init: false
-      # ★ Host-specific, not stack-specific. On the H200 box the colocated loop's
-      # release/resume around each weight sync drives sglang's torch_memory_saver
-      # over CUDA VMM and aborts the server:
+      # ★ The memory saver is deliberately NOT disabled here, and an earlier
+      # revision of this file that disabled it was wrong.
       #
-      #   CUDA error: invalid argument -> at::cuda::MemPool::~MemPool()
-      #   -> Fatal Python error: Aborted
+      # The reasoning that led there: sglang's resume failed on both hosts we run
+      # on -- `CUDA error: invalid argument` out of at::cuda::MemPool on one,
+      # `KeyError: 'weights'` from offload_tags.remove(tag) on the other -- so the
+      # saver was switched off and gpu_memory_utilization dropped to buy the actor
+      # and critic room. That trade does not close: with the engine holding its
+      # reservation for the whole iteration, a card sized for rollout plus a 7B
+      # actor plus a 7B critic does not exist here, and every reduction just moved
+      # the OOM (actor backward -> critic_train_mini_batch) without ever fitting.
       #
-      # reaching the trainer only as "Failed to complete async request to
-      # resume_memory_occupation after 3 attempts". It reproduces on the verified
-      # A100 version set too, so it is the machine and not the pins -- the
-      # reference deployment is A100-80GB and does not hit it.
+      # What settles it is the configuration this experiment originally ran under
+      # (see git show db41f56^ of any IVP pipeline.yaml): sglang, memory saver on,
+      # gpu_memory_utilization 0.6, on the same hardware. The saver is not broken
+      # on this stack -- it was being enabled without the rest of that rollout
+      # block, in particular `mode: async` and the two sglang attention backends
+      # the pipelines now restore.
       #
-      # sglang_rollout.py gates the calls on free_cache_engine; the engine builds
-      # the pool regardless, so enable_memory_saver has to go too. That one is
-      # reachable without patching verl only because async_sglang_server.py
-      # spreads **engine_kwargs last, after its hardcoded True.
-      free_cache_engine: false
-      engine_kwargs:
-        sglang:
-          enable_memory_saver: false
+      # ★ free_cache_engine is set back to True here, against VAGEN's shared flags,
+      # which now carry:
+      #
+      #   # The legacy separated trainer performs its first weight sync before putting
+      #   # SGLang to sleep. Disabling cache offload avoids an invalid
+      #   # resume-before-sleep transition.
+      #   actor_rollout_ref.rollout.free_cache_engine=False
+      #
+      # That is the same defect this project hit, worked around from the other side.
+      # The fix is in the verl this VAGEN pins (aa4930f7): SeparateRayPPOTrainer's
+      # init_workers sleeps the replicas again, so the first sync has a matching
+      # release and there is no invalid transition left to avoid.
+      #
+      # Keeping the workaround would be actively harmful here. With cache offload off
+      # the engine holds its whole gpu_memory_utilization reservation for the entire
+      # iteration rather than just during rollout, which is what produced the OOM in
+      # the actor backward pass, then in critic_train_mini_batch, and finally in the
+      # checkpoint save. See the pipelines, which carry 0.6 on that assumption.
+      #
+      # enable_memory_saver stays at its default (True); nothing overrides it.
+      free_cache_engine: true

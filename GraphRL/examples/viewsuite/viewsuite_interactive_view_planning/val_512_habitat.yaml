@@ -1,0 +1,19 @@
+envs:
+  - name: InteractiveViewPlanning
+    data_source: ae
+    seed: [0, 377, 1]
+    n_envs: 378
+    max_turns: 10
+    response_length_per_turn: 512
+    config:
+      jsonl_path: ${oc.env:VIEWSUITE_ROOT}/data/viewsuite_15k_habitat/interactive_view_planning_dev.jsonl
+      image_size: [512, 512]
+      format: eval_mode
+      use_example_in_sys_prompt: false
+      client_url_file_path: ${oc.env:VIEWSUITE_ROOT}/client_url.txt
+      render_backend: client
+      max_turns: 10
+      action_only_mode: true
+      allow_rotate: false
+      ground_plane_movement: false
+      obs_format_bonus_reward: 0.01

@@ -53,9 +53,9 @@ _VALID_ACTIONS = frozenset({
     "look_up", "look_down", "rotate_cw", "rotate_ccw",
 })
 
-# Habitat-GS' compact IVP environment uses viewer keys while the graph and SFT
-# generators use corpus-independent semantic action names.  Normalise at the
-# ingestion boundary; ScanNet/AI2-THOR's existing semantic names pass through.
+# Older Habitat-GS IVP rollouts may contain viewer-key aliases. Normalise them at
+# the ingestion boundary; current Habitat-GS, ScanNet, and AI2-THOR rollouts all
+# emit the corpus-independent semantic action names directly.
 _ACTION_ALIASES = {
     "w": "move_forward",
     "s": "move_backward",
@@ -407,7 +407,14 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
 
         # New rollouts carry scene identity structurally. Keep prompt parsing as
         # backward compatibility for historical ScanNet/AI2-THOR files.
-        explicit_scene_id = (episode_data or {}).get("scene_id")
+        episode_data = episode_data or {}
+        metadata = episode_data.get("rollout_metadata")
+        explicit_scene_id = episode_data.get("scene_id")
+        if not explicit_scene_id and isinstance(metadata, dict):
+            # Normally VAGEN flattens env-selected rollout metadata at the JSONL
+            # boundary. Accept the structured form too so copied/intermediate artifacts
+            # do not have to leak scene identity into the model-visible prompt.
+            explicit_scene_id = metadata.get("scene_id")
         scene_id = str(explicit_scene_id).strip() if explicit_scene_id else None
         if scene_id is None:
             for msg in messages:
@@ -444,13 +451,20 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
             content = msg["content"]
 
             if role == "user":
-                # Habitat-GS repeats TARGET, TOP-DOWN and the full explored
-                # trajectory every turn.  Its current state is therefore the
-                # final trajectory pose/image, not the first pose/image (which
-                # belongs to the top-down reference).  Legacy ViewSuite prompts
-                # retain their original first-pose/first-image behaviour.
+                # Habitat-GS supports two observation protocols.  Self-contained
+                # no-concat observations repeat the full trajectory, so the current
+                # state is the final pose/image.  Concat observations label exactly
+                # one CURRENT VIEW; on reset it follows target and top-down images,
+                # while later turns contain only that current image.
                 self_contained = "EXPLORED TRAJECTORY" in content
-                pose = _parse_pose(content, last=self_contained)
+                current_marker = re.search(
+                    r"CURRENT VIEW(?:\s*\(initial\))?\s*<image>",
+                    content,
+                    re.IGNORECASE,
+                )
+                pose = _parse_pose(
+                    content, last=self_contained or current_marker is not None
+                )
                 num_images = _count_images(content)
                 if pose is None:
                     global_img_idx += num_images
@@ -458,11 +472,20 @@ class InteractiveViewPlanningGraphBuilder(VagenGraphBuilder):
 
                 obs_img_path = None
                 if num_images > 0:
-                    obs_img_idx = (
-                        global_img_idx + num_images - 1
-                        if self_contained
-                        else global_img_idx
-                    )
+                    if self_contained:
+                        obs_img_idx = global_img_idx + num_images - 1
+                    else:
+                        # Reset prompts name reference images in display order. The
+                        # concat Habitat-GS prompt labels CURRENT VIEW explicitly;
+                        # legacy prompts label it as the initial view.
+                        initial_marker = current_marker or re.search(
+                            r"initial view\s*<image>", content, re.IGNORECASE
+                        )
+                        obs_img_idx = global_img_idx
+                        if initial_marker:
+                            obs_img_idx += content[:initial_marker.start()].count(
+                                _IMAGE_PLACEHOLDER
+                            )
                     for suffix in (".png", ".jpg"):
                         candidate = image_base / f"{obs_img_idx}{suffix}"
                         if candidate.exists():

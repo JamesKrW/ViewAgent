@@ -168,10 +168,19 @@ class GymProxyTool(GymScannetToolEnv):
             "success": False,
             "scene_id": item.get("scene_id"),
             "sample_id": item.get("sample_id"),
+            "rollout_metadata": {
+                "scene_id": item.get("scene_id"),
+                "sample_id": item.get("sample_id"),
+                "jsonl_idx": idx,
+            },
             "gt_action_seq": item.get("gt_action_seq"),
             "pos_threshold_m": float(pos_thr_m),
             "ang_threshold_deg": float(ang_thr_deg),
             "jsonl_idx": idx,
+            "ground_plane_movement": self.ground_plane_movement,
+            "action_space_version": (
+                "ground_plane_v1" if self.ground_plane_movement else "legacy_v1"
+            ),
         }
 
     def _info_step(self, success: bool = False, error: Optional[str] = None) -> Dict[str, Any]:
@@ -347,6 +356,14 @@ class GymProxyTool(GymScannetToolEnv):
         item = read_jsonl_line_by_index(self.jsonl_path, idx)
         self.current_item = item
         self.current_index = idx
+
+        declared_mode = (item.get("meta") or {}).get("ground_plane_movement")
+        if declared_mode is not None and bool(declared_mode) != self.ground_plane_movement:
+            raise ValueError(
+                "Dataset/action-space mismatch: row declares "
+                f"ground_plane_movement={bool(declared_mode)}, but the environment "
+                f"is configured with ground_plane_movement={self.ground_plane_movement}."
+            )
 
         # Adaptive thresholds based on ground-truth action sequence length.
         gt_action_seq = item["gt_action_seq"]

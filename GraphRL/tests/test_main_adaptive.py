@@ -69,7 +69,10 @@ def test_backend_horizon_is_remaining_global_budget_not_per_round_limit(tmp_path
     assert trainer["test_freq"] == 20
     assert trainer["save_freq"] == 20
     assert trainer["val_before_train"] is True
-    assert trainer["save_best_val"] is False
+    # save_best_actor on this backend; save_best_val was the previous name and is
+    # not a key the trainer accepts, so setting it fails the launch outright.
+    assert trainer["save_best_actor"] is False
+    assert "save_best_val" not in trainer
 
 
 def test_adaptive_command_uses_separate_trainer_entrypoint(tmp_path):
@@ -265,15 +268,28 @@ def test_rebuilding_traj_output_invalidates_stale_sft_checkpoint(tmp_path):
     assert not sft_base.exists()
 
 
-def test_rollout_prefix_requires_json_and_images_for_every_step(tmp_path):
+def test_rollout_prefix_requires_json_for_every_step(tmp_path):
+    """The prefix stops at the first step missing either half of its payload."""
     rollout_dir = tmp_path / "rollout_data"
+    rollout_dir.mkdir(parents=True)
     for step in (1, 2):
-        (rollout_dir / f"image_{step}" / "images_0").mkdir(parents=True)
         (rollout_dir / f"{step}.jsonl").write_text("{}\n", encoding="utf-8")
-        (rollout_dir / f"image_{step}" / "images_0" / "0.png").write_bytes(b"png")
+        image_dir = rollout_dir / f"image_{step}" / "images_0"
+        image_dir.mkdir(parents=True)
+        (image_dir / "0.png").write_bytes(b"png")
 
     assert durable_rollout_prefix(rollout_dir) == 2
-    (rollout_dir / "image_2" / "images_0" / "0.png").unlink()
+    (rollout_dir / "2.jsonl").unlink()
+    assert durable_rollout_prefix(rollout_dir) == 1
+
+
+def test_rollout_prefix_stops_at_missing_frames(tmp_path):
+    rollout_dir = tmp_path / "rollout_data"
+    (rollout_dir / "image_1" / "images_0").mkdir(parents=True)
+    (rollout_dir / "image_1" / "images_0" / "0.png").write_bytes(b"png")
+    for step in (1, 2):
+        (rollout_dir / f"{step}.jsonl").write_text("{}\n", encoding="utf-8")
+
     assert durable_rollout_prefix(rollout_dir) == 1
 
 

@@ -25,9 +25,8 @@ must depict something a reader could identify and tell apart from other views. T
 criterion covers all three failure modes seen in this corpus -- off-manifold smear, a
 blank wall or floor, and a frame that is simply too dark.
 
-Actions come from ``HabitatGSViewManipulator``, the same object the IVP env drives, so
-ground truth here and transitions there are the same function. (The AI2-THOR generator
-and its env do not share one, and silently disagree once pitch is non-zero.)
+Actions come from ``HabitatGSViewManipulator``, the same object the IVP env and graph
+atomizer drive, so ground truth and online transitions are the same function.
 """
 from __future__ import annotations
 
@@ -66,6 +65,9 @@ class GenConfig:
     eye_height_m: float = 1.5           # above the walkable surface
     pitch_limit_deg: float = 60.0
     step_rotation_deg: float = 30.0
+    # Explicitly versions vertical movement. Horizontal body movement is always
+    # ground-parallel; when true, up/down are world Y instead of sensor-local Y.
+    ground_plane_movement: bool = False
     # --- per-scene translation step ---
     # step = clamp(navmesh_diagonal / step_scene_divisor, lo, hi). The divisor is set so
     # a median room (23 m diagonal) lands on 0.5 m, the value the other two envs use.
@@ -161,6 +163,7 @@ def _sample_pose(renderer: HabitatGSRenderer, rng: random.Random, cfg: GenConfig
         step_rotation_deg=cfg.step_rotation_deg,
         pitch_limit_deg=cfg.pitch_limit_deg,
         discrete=True,
+        ground_plane_movement=cfg.ground_plane_movement,
     )
 
 
@@ -178,6 +181,7 @@ def _apply(vm_state: HabitatGSViewManipulator, seq: Sequence[str], step_t: float
         position=tuple(vm_state.pos), yaw_deg=vm_state.yaw, pitch_deg=vm_state.pitch,
         step_translation=step_t, step_rotation_deg=cfg.step_rotation_deg,
         pitch_limit_deg=cfg.pitch_limit_deg, discrete=True,
+        ground_plane_movement=cfg.ground_plane_movement,
     )
     for a in seq:
         vm.step(a)
@@ -292,6 +296,11 @@ def build_sample(renderer: HabitatGSRenderer, scene_id: str, sample_idx: int,
             # Recorded so the env can adopt it: the ground truth was built with this
             # limit, and an env that lets the camera pitch further is a different task.
             "pitch_limit_deg": cfg.pitch_limit_deg,
+            "ground_plane_movement": cfg.ground_plane_movement,
+            "action_space_version": (
+                "ground_plane_v1" if cfg.ground_plane_movement else "legacy_v1"
+            ),
+            "world_up_axis": "Y",
             "gt_label": gt_letter,
             "gt_action_seq_letters": list(gt_seq),
             "gt_action_seq_names": [ACTION_NAMES.get(a, a) for a in gt_seq],
@@ -306,7 +315,8 @@ def build_sample(renderer: HabitatGSRenderer, scene_id: str, sample_idx: int,
         forward_row = {
             "scene_id": scene_id, "sample_id": sample_id,
             "prompt": _forward_prompt(step_t, cfg.step_rotation_deg,
-                                      common_meta["gt_action_seq_names"]),
+                                      common_meta["gt_action_seq_names"],
+                                      cfg.ground_plane_movement),
             "image_path": [init_rel, top_down_rel] + opt_rels,
             "image_detail": {
                 "init_view": detail(init_rel, init),
@@ -319,7 +329,10 @@ def build_sample(renderer: HabitatGSRenderer, scene_id: str, sample_idx: int,
         }
         inverse_row = {
             "scene_id": scene_id, "sample_id": sample_id,
-            "prompt": _inverse_prompt(step_t, cfg.step_rotation_deg, seq_names),
+            "prompt": _inverse_prompt(
+                step_t, cfg.step_rotation_deg, seq_names,
+                cfg.ground_plane_movement,
+            ),
             "image_path": [init_rel, top_down_rel, target_rel],
             "image_detail": {
                 "init_view": detail(init_rel, init),
@@ -331,7 +344,7 @@ def build_sample(renderer: HabitatGSRenderer, scene_id: str, sample_idx: int,
         }
         active_row = {
             "scene_id": scene_id, "sample_id": sample_id,
-            "prompt": _active_prompt(),
+            "prompt": _active_prompt(cfg.ground_plane_movement),
             "image_path": [init_rel, top_down_rel, target_rel],
             "image_detail": {
                 "init_view": detail(init_rel, init),
@@ -342,7 +355,9 @@ def build_sample(renderer: HabitatGSRenderer, scene_id: str, sample_idx: int,
                           "gs_pose": gt_vm.get_state()},
             "meta": {k: common_meta[k] for k in
                      ("step_translation_m", "step_rotation_deg",
-                      "gt_action_seq_letters", "gt_action_seq_names")},
+                      "pitch_limit_deg", "ground_plane_movement",
+                      "action_space_version", "world_up_axis", "gt_action_seq_letters",
+                      "gt_action_seq_names")},
         }
         return {"forward": forward_row, "inverse": inverse_row,
                 "active_explore": active_row}
@@ -350,33 +365,59 @@ def build_sample(renderer: HabitatGSRenderer, scene_id: str, sample_idx: int,
     return None
 
 
-def _forward_prompt(step_t: float, step_r: float, names: List[str]) -> str:
+def _movement_prompt(ground_plane_movement: bool) -> str:
+    vertical = (
+        "up/down use world +Y/-Y"
+        if ground_plane_movement
+        else "up/down follow sensor-local up/down and tilt with pitch"
+    )
+    mode = "ground_plane_v1" if ground_plane_movement else "legacy_v1"
+    return (
+        f"Movement mode = {mode}: forward/backward and left/right use yaw only on the horizontal world XZ "
+        f"plane; look up/down changes pitch only; {vertical}."
+    )
+
+
+def _forward_prompt(
+    step_t: float,
+    step_r: float,
+    names: List[str],
+    ground_plane_movement: bool = False,
+) -> str:
     return (
         f"Given the initial view <image> and a top-down reference <image>, "
         f"after you execute the following action sequence "
         f"(translation step = {step_t} m; rotation step = {step_r} degrees per step):\n"
+        f"{_movement_prompt(ground_plane_movement)}\n"
         f"[{', '.join(names)}]\n"
         f"which of the following images corresponds to the result?\n"
         f"A. <image>\nB. <image>\nC. <image>\nD. <image>\n"
     )
 
 
-def _inverse_prompt(step_t: float, step_r: float, names: Dict[str, List[str]]) -> str:
+def _inverse_prompt(
+    step_t: float,
+    step_r: float,
+    names: Dict[str, List[str]],
+    ground_plane_movement: bool = False,
+) -> str:
     lines = [
         "Given the initial view <image> and a top-down reference <image>, "
         "which action sequence will reach the target view <image>?",
         f"(Action semantics: translation step = {step_t} m; "
         f"rotation step = {step_r} degrees per step.)",
+        _movement_prompt(ground_plane_movement),
     ]
     for letter in OPTION_LETTERS:
         lines.append(f"{letter}. [{', '.join(names[letter])}]")
     return "\n".join(lines) + "\n"
 
 
-def _active_prompt() -> str:
+def _active_prompt(ground_plane_movement: bool = False) -> str:
     return (
         "Given the initial view <image> and a top-down reference <image>, "
-        "estimate the target view's 6-DoF pose relative to the world."
+        "estimate the target view's 6-DoF pose relative to the world. "
+        + _movement_prompt(ground_plane_movement)
     )
 
 

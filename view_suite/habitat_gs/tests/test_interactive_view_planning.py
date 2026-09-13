@@ -89,27 +89,55 @@ class HabitatGSInteractiveViewPlanningTest(unittest.TestCase):
     def _run(coro):
         return asyncio.run(coro)
 
-    def test_reset_is_self_contained_and_hides_target_pose(self):
+    def test_concat_reset_has_references_once_and_hides_target_pose(self):
         env = self._make_env()
+        self.assertFalse(env.ground_plane_movement)
+        self.assertEqual(env.observation_mode, "concat")
 
         async def scenario():
             try:
                 obs, info = await env.reset(seed=0)
+                system = (await env.system_prompt())["obs_str"]
                 images = obs["multi_modal_input"]["<image>"]
+                self.assertIn("ACTION SPACE\n------------", system)
+                self.assertNotIn("LEGACY_V1", system)
+                self.assertIn("Rotation snapping: enabled", system)
+                self.assertIn("move along sensor-local up", system)
+                self.assertIn("- move_forward:", system)
+                self.assertIn("- answer(tx, ty, tz, rx, ry, rz):", system)
+                self.assertNotIn("- w:", system)
+                self.assertNotIn("submit_pose", system)
+                self.assertNotIn("NAVIGATION ACTIONS", system)
                 self.assertEqual(obs["obs_str"].count("<image>"), len(images))
                 self.assertEqual(len(images), 3)
                 self.assertIn("TARGET VIEW (camera pose unknown)", obs["obs_str"])
                 self.assertIn("TOP-DOWN REFERENCE", obs["obs_str"])
-                self.assertIn("E0 (initial view)", obs["obs_str"])
+                self.assertIn("CURRENT VIEW (initial)", obs["obs_str"])
+                self.assertNotIn("EXPLORED TRAJECTORY", obs["obs_str"])
+                self.assertIn(
+                    "Every later observation contains only the latest CURRENT VIEW",
+                    system,
+                )
                 self.assertNotIn("SUBMISSION RESULT", obs["obs_str"])
                 self.assertEqual(info["metrics"]["turns_used"], 0)
+                self.assertEqual(
+                    info["rollout_metadata"],
+                    {
+                        "scene_id": "test_scene",
+                        "sample_id": "test_sample",
+                        "jsonl_idx": 0,
+                    },
+                )
             finally:
                 await env.close()
 
         self._run(scenario())
 
     def test_navigation_batch_renders_once_and_appends_one_frame(self):
-        env = self._make_env()
+        env = self._make_env(
+            ground_plane_movement=True,
+            is_snap_every_step=False,
+        )
 
         async def scenario():
             calls = []
@@ -119,7 +147,12 @@ class HabitatGSInteractiveViewPlanningTest(unittest.TestCase):
                 return Image.new("RGB", (width, height), (123, 45, 67))
 
             try:
-                reset_obs, _ = await env.reset(seed=0)
+                await env.reset(seed=0)
+                system = (await env.system_prompt())["obs_str"]
+                self.assertIn("ACTION SPACE\n------------", system)
+                self.assertNotIn("GROUND_PLANE_V1", system)
+                self.assertIn("Rotation snapping: disabled", system)
+                self.assertIn("move along world +Y", system)
                 y_before = float(env.view_engine.pos[1])
                 env._render_current = fake_render
                 obs, _, done, info = await env.step("<action>arrow_up|z|w</action>")
@@ -129,23 +162,53 @@ class HabitatGSInteractiveViewPlanningTest(unittest.TestCase):
                 self.assertEqual(len(env.exploration_history), 2)
                 self.assertEqual(
                     env.exploration_history[-1].incoming_actions,
-                    ("arrow_up", "z", "w"),
+                    ("look_up", "move_up", "move_forward"),
                 )
-                self.assertEqual(obs["obs_str"].count("<image>"), 4)
-                self.assertEqual(len(obs["multi_modal_input"]["<image>"]), 4)
+                self.assertEqual(obs["obs_str"].count("<image>"), 1)
+                self.assertEqual(len(obs["multi_modal_input"]["<image>"]), 1)
                 self.assertEqual(info["primitive_actions"], 3)
-                stable_reset_prefix = reset_obs["obs_str"].split(
-                    "\n\nEPISODE STATE", maxsplit=1
-                )[0]
-                self.assertTrue(obs["obs_str"].startswith(stable_reset_prefix))
-                self.assertGreater(
-                    obs["obs_str"].index("LAST ACTION RESULT"),
-                    obs["obs_str"].index("E1"),
-                )
+                self.assertIn("CURRENT VIEW", obs["obs_str"])
+                self.assertNotIn("TARGET VIEW", obs["obs_str"])
+                self.assertNotIn("TOP-DOWN REFERENCE", obs["obs_str"])
+                self.assertNotIn("EXPLORED TRAJECTORY", obs["obs_str"])
+                self.assertIn("LAST ACTION RESULT", obs["obs_str"])
             finally:
                 await env.close()
 
         self._run(scenario())
+
+    def test_no_concat_observation_repeats_complete_trajectory(self):
+        env = self._make_env(observation_mode="no_concat")
+
+        async def scenario():
+            async def fake_render(width, height):
+                return Image.new("RGB", (width, height), (123, 45, 67))
+
+            try:
+                reset_obs, _ = await env.reset(seed=0)
+                system = (await env.system_prompt())["obs_str"]
+                self.assertIn("Every turn is self-contained", system)
+                self.assertIn("EXPLORED TRAJECTORY", reset_obs["obs_str"])
+                self.assertIn("E0 (initial view)", reset_obs["obs_str"])
+
+                env._render_current = fake_render
+                obs, _, done, _ = await env.step(
+                    "<action>move_forward</action>"
+                )
+                self.assertFalse(done)
+                self.assertEqual(obs["obs_str"].count("<image>"), 4)
+                self.assertEqual(len(obs["multi_modal_input"]["<image>"]), 4)
+                self.assertIn("TARGET VIEW", obs["obs_str"])
+                self.assertIn("TOP-DOWN REFERENCE", obs["obs_str"])
+                self.assertIn("E0 --[move_forward]--> E1", obs["obs_str"])
+            finally:
+                await env.close()
+
+        self._run(scenario())
+
+    def test_observation_mode_is_validated(self):
+        with self.assertRaisesRegex(ValueError, "observation_mode"):
+            self._make_env(observation_mode="invalid")
 
     def test_mixed_submit_is_rejected_without_moving(self):
         env = self._make_env()
@@ -155,7 +218,7 @@ class HabitatGSInteractiveViewPlanningTest(unittest.TestCase):
                 await env.reset(seed=0)
                 pose_before = env.view_engine.get_pose().copy()
                 _, reward, done, info = await env.step(
-                    "<action>w|submit_pose(0,0,0,0,0,0)</action>"
+                    "<action>move_forward|answer(0,0,0,0,0,0)</action>"
                 )
                 self.assertFalse(done)
                 self.assertEqual(reward, 0.0)
@@ -177,7 +240,7 @@ class HabitatGSInteractiveViewPlanningTest(unittest.TestCase):
                 target = env.target_view["c2w_se3_deg"]
                 blob = ",".join(str(float(value)) for value in target)
                 obs, _, done, info = await env.step(
-                    f"<action>submit_pose({blob})</action>"
+                    f"<action>answer({blob})</action>"
                 )
                 self.assertTrue(done)
                 self.assertTrue(info["success"])
@@ -191,7 +254,7 @@ class HabitatGSInteractiveViewPlanningTest(unittest.TestCase):
     def test_shell_syntax(self):
         response, error = _shell_command_to_response("←", "eval_mode")
         self.assertEqual(error, "")
-        self.assertEqual(response, "<action>arrow_left</action>")
+        self.assertEqual(response, "<action>turn_left</action>")
 
         response, error = _shell_command_to_response("ww←z", "eval_mode")
         self.assertIsNone(response)
@@ -203,7 +266,7 @@ class HabitatGSInteractiveViewPlanningTest(unittest.TestCase):
         self.assertEqual(error, "")
         self.assertEqual(
             response,
-            "<action>submit_pose(1,2,3,-10,20,30)</action>",
+            "<action>answer(1,2,3,-10,20,30)</action>",
         )
 
 

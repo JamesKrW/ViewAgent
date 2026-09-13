@@ -94,21 +94,43 @@ def build_vagen_env(config: Dict[str, Any]) -> Dict[str, str]:
     inherited = os.environ.get("PYTHONPATH", "")
     if inherited:
         parts.extend(p for p in inherited.split(os.pathsep) if p)
+
+    # Launchers may select the training environment through an absolute Python
+    # path without activating that environment. Keep its console tools reachable
+    # as well: SGLang's JIT invokes ``ninja`` by name, and otherwise a fully
+    # installed environment fails only when the first multimodal kernel compiles.
+    python_bin = str(Path(sys.executable).parent)
+    inherited_path = os.environ.get("PATH", "")
+    path_parts = [python_bin]
+    if inherited_path:
+        path_parts.extend(p for p in inherited_path.split(os.pathsep) if p)
     # dict.fromkeys de-duplicates while keeping first-wins order
     return {
         **os.environ,
         "PYTHONUNBUFFERED": "1",
         "PYTHONPATH": os.pathsep.join(dict.fromkeys(parts)),
+        "PATH": os.pathsep.join(dict.fromkeys(path_parts)),
     }
+
+
+# VAGEN's shared flags file, newest name first. It was renamed from
+# `baseline_vllm.flags` when the defaults switched from vLLM to SGLang, so the old
+# name is still accepted for checkouts from before that. Both are read the same way.
+_BASELINE_FLAG_NAMES = ("training_defaults.flags", "baseline_vllm.flags")
 
 
 def _baseline_flags(vagen_dir: Path) -> List[str]:
     """Read VAGEN's shared flags file, substituting ``$V`` for the checkout."""
-    flags_path = vagen_dir / "vagen" / "configs" / "baseline_vllm.flags"
-    if not flags_path.is_file():
+    configs = vagen_dir / "vagen" / "configs"
+    flags_path = next(
+        (configs / name for name in _BASELINE_FLAG_NAMES if (configs / name).is_file()),
+        None,
+    )
+    if flags_path is None:
         raise FileNotFoundError(
-            f"VAGEN baseline flags not found at {flags_path}. Without them verl runs "
-            f"its own agent loop and none of VAGEN's rollout code executes."
+            f"VAGEN baseline flags not found in {configs}; looked for "
+            f"{', '.join(_BASELINE_FLAG_NAMES)}. Without them verl runs its own agent "
+            f"loop and none of VAGEN's rollout code executes."
         )
     flags: List[str] = []
     for line in flags_path.read_text().splitlines():

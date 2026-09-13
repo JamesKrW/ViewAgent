@@ -7,22 +7,23 @@ from typing import Any
 
 
 def rollout_step_is_complete(rollout_dir: str | Path, step: int) -> bool:
-    """Return whether one rollout step was atomically published.
+    """Return whether one rollout step was published in full.
 
-    New SLIME runs publish ``<step>.complete`` only after their JSONL and any
-    enabled images are durable.  Images are intentionally optional after the
-    adaptive latch, while JSONL remains available for diagnostics.  The image
-    check is retained as a fallback for older VAGEN experiment directories.
+    TrajToSFT consumes both ``<step>.jsonl`` and the matching
+    ``image_<step>/`` tree. A SLIME-era ``<step>.complete`` marker is also a
+    sufficient publication signal because it was written only after both were
+    durable. VAGEN/verl does not write that marker, so require at least one
+    materialized frame there.
     """
     root = Path(rollout_dir)
     jsonl = root / f"{int(step)}.jsonl"
-    images = root / f"image_{int(step)}"
     marker = root / f"{int(step)}.complete"
     try:
         if not jsonl.is_file() or jsonl.stat().st_size <= 0:
             return False
         if marker.is_file():
             return marker.read_text(encoding="utf-8").strip() == "complete"
+        images = root / f"image_{int(step)}"
         if not images.is_dir():
             return False
         return any(path.is_file() and path.stat().st_size > 0 for path in images.rglob("*"))
@@ -48,16 +49,8 @@ def required_rollout_prefix(
     is durable through the same step. Once latched, SFT is permanently disabled
     for the run, so a complete rollout prefix is no longer part of resumability.
 
-    ★ The latch shortcut is load-bearing on the VAGEN/verl backend, not a
-    micro-optimisation. ``rollout_step_is_complete`` accepts a step on either of
-    two signals: a ``<step>.complete`` marker, or a non-empty ``image_<step>/``
-    directory. verl writes no marker -- that was SLIME's -- so frames are the only
-    signal, and the latch is precisely when the adaptive trainer stops writing
-    them. Without this branch the first post-latch checkpoint can never commit:
-
-        RuntimeError: regular checkpoint cannot commit before its rollout payload
-
-    which lands at the single most important moment of the experiment.
+    The latch shortcut is load-bearing on VAGEN/verl: image capture is disabled
+    after latching because no later SFT phase can consume those trajectories.
     """
     if bool(state.get("latched")):
         return 0

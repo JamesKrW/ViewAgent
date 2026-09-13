@@ -25,6 +25,7 @@
 #
 # Env:
 #   VIEWSUITE_ROOT       repo root (required)
+#   DATA_CORPUS          optional staged dataset directory override
 #   PREFLIGHT_ONLY=1     run the gate, skip training
 #   PREFLIGHT_EPISODES   episodes for stage 4 (default 3)
 #   RENDER_TLS_NO_VERIFY=1  accept a self-signed render cert
@@ -46,6 +47,9 @@ case "$CORPUS" in
               DATA_SUBDIR=viewagent15k_scannet_open3d; VAL_SPLIT=dev;  URL_NAME=client_url.txt ;;
   *) echo "unknown corpus: $CORPUS (expected habitat_gs, ai2thor or viewsuite)"; exit 2 ;;
 esac
+
+# The renderer route and staged dataset directory may have different names.
+DATA_SUBDIR="${DATA_CORPUS:-$DATA_SUBDIR}"
 
 : "${VIEWSUITE_ROOT:?VIEWSUITE_ROOT must be exported}"
 DATA_DIR="$VIEWSUITE_ROOT/data/$DATA_SUBDIR"
@@ -167,7 +171,10 @@ for yml, split in (("train.yaml", "train"), ("val.yaml", val_split)):
     path = os.path.join(example_dir, yml)
     if not os.path.isfile(path):
         bad.append(f"missing {yml}"); continue
-    for n in (int(x) for x in re.findall(r"n_envs:\s*(\d+)", open(path).read())):
+    active_yaml = "\n".join(
+        line for line in open(path) if not re.match(r"^\s*#", line)
+    )
+    for n in (int(x) for x in re.findall(r"n_envs:\s*(\d+)", active_yaml)):
         rows = counts.get(("interactive_view_planning", split))
         if rows is not None and n != rows:
             bad.append(f"{yml}: n_envs={n} but {split} split has {rows} rows")
@@ -268,7 +275,7 @@ PY
 # Turns must advance past the first.
 PYTHONPATH="$VIEWSUITE_ROOT:${PYTHONPATH:-}" \
 "$PY" - "$DATA_DIR" "$URL_FILE" "$ENV_CLASS" "$EPISODES" "$VAL_SPLIT" <<'PY' || { echo "[preflight][FATAL] env smoke failed"; exit 1; }
-import asyncio, importlib, os, sys
+import asyncio, importlib, json, os, sys
 
 data_dir, url_file, env_class, n_ep = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
 
@@ -293,6 +300,11 @@ cfg = {
     "action_only_mode": True,
     "allow_rotate": False,
 }
+with open(cfg["jsonl_path"]) as f:
+    first_item = json.loads(next(line for line in f if line.strip()))
+declared_ground_plane = (first_item.get("meta") or {}).get("ground_plane_movement")
+if declared_ground_plane is not None:
+    cfg["ground_plane_movement"] = bool(declared_ground_plane)
 
 async def one(seed):
     env = cls(dict(cfg))

@@ -1,6 +1,6 @@
 ## Examples
 
-### 1. Qwen2.5-VL-7B on Hopper / H100 / H200
+### 1. Qwen2.5-VL-7B on Hopper (sm_90)
 
 Default attention kernels work out of the box.
 

@@ -78,6 +78,8 @@ envs:
       format: eval_mode
       use_example_in_sys_prompt: false
       action_only_mode: true
+      allow_rotate: false
+      ground_plane_movement: false
 
 experiment:
   dump_dir: ${fileroot}/rollouts/baseline_v2

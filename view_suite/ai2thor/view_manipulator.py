@@ -2,10 +2,6 @@ import os
 from datetime import datetime
 
 import numpy as np
-import cv2
-
-from ai2thor.controller import Controller
-from ai2thor.platform import CloudRendering
 
 
 def _clamp(x, lo, hi):
@@ -73,6 +69,10 @@ class ViewManipulator:
         pitch : + -> look up
         roll  : + -> CCW (our internal convention)
 
+    With ``ground_plane_movement=True``, translation uses a yaw-only body basis and
+    world Y for up/down. With it disabled, translation follows the full camera basis
+    for compatibility with the original generated corpus.
+
     Output pose format (AI2-THOR acceptable):
       {"position": {"x":..,"y":..,"z":..},
        "rotation": {"x":..,"y":..,"z":..}}
@@ -80,12 +80,14 @@ class ViewManipulator:
 
     def __init__(
         self,
-        init_pose: dict | None,
+        init_pose: dict | None = None,
         step_translation: float = 0.25,
         step_rotation_deg: float = 30.0,
         pitch_limit_deg: float = 89.0,
         roll_enabled: bool = True,
         is_discrete: bool = False,
+        is_snap_every_step: bool = True,
+        ground_plane_movement: bool = False,
     ):
         self.step_t = float(step_translation)
         self.step_r = float(step_rotation_deg)
@@ -93,6 +95,8 @@ class ViewManipulator:
         self.pitch_limit = float(pitch_limit_deg)
         self.roll_enabled = bool(roll_enabled)
         self.is_discrete = bool(is_discrete)
+        self.is_snap_every_step = bool(is_snap_every_step) and self.is_discrete
+        self.ground_plane_movement = bool(ground_plane_movement)
 
         # canonical pose (intuitive)
         self.pos = np.zeros(3, dtype=np.float64)
@@ -102,12 +106,14 @@ class ViewManipulator:
 
         if init_pose is not None:
             self.set_pose_thor(init_pose)
-        if self.is_discrete:
+        if self.is_snap_every_step:
             self._snap_angles()
 
     # ---------------- basis ----------------
     def _basis(self):
-        Rm = _rot_yaw_pitch_roll_matrix(self.yaw, self.pitch, self.roll)
+        pitch = 0.0 if self.ground_plane_movement else self.pitch
+        roll = 0.0 if self.ground_plane_movement else self.roll
+        Rm = _rot_yaw_pitch_roll_matrix(self.yaw, pitch, roll)
         right = Rm @ np.array([1.0, 0.0, 0.0], dtype=np.float64)
         up = Rm @ np.array([0.0, 1.0, 0.0], dtype=np.float64)
         fwd = Rm @ np.array([0.0, 0.0, 1.0], dtype=np.float64)
@@ -115,7 +121,7 @@ class ViewManipulator:
 
     # ---------------- snapping ----------------
     def _snap_angles(self):
-        if not self.is_discrete:
+        if not self.is_snap_every_step:
             return
         self.yaw = _snap(self.yaw, self.step_r)
         self.pitch = _snap(self.pitch, self.step_r)
@@ -158,8 +164,44 @@ class ViewManipulator:
         self.yaw = float(r["y"])
         self.roll = -float(r["z"])
 
-        if self.is_discrete:
+        if self.is_snap_every_step:
             self._snap_angles()
+
+    def reset(self, initial_extrinsic_c2w=None) -> np.ndarray:
+        """Reset from a shared-runtime c2w matrix (or a native THOR pose dict)."""
+        if initial_extrinsic_c2w is None:
+            self.pos[:] = 0.0
+            self.yaw = self.pitch = self.roll = 0.0
+        elif isinstance(initial_extrinsic_c2w, dict):
+            self.set_pose_thor(initial_extrinsic_c2w)
+        else:
+            from view_suite.ai2thor.pose_utils import c2w_to_unity_pose
+            self.set_pose_thor(c2w_to_unity_pose(np.asarray(initial_extrinsic_c2w,
+                                                             dtype=np.float64)))
+        if self.is_snap_every_step:
+            self._snap_angles()
+        return self.get_pose(mode="c2w")
+
+    def get_pose(self, mode: str = "c2w") -> np.ndarray:
+        """Return a c2w/w2c matrix, matching the shared tool-env interface."""
+        from view_suite.ai2thor.pose_utils import unity_pose_to_c2w
+        c2w = np.asarray(unity_pose_to_c2w(self.get_pose_thor()), dtype=np.float64)
+        if mode == "c2w":
+            return c2w
+        if mode == "w2c":
+            return np.linalg.inv(c2w)
+        raise ValueError(f"mode must be 'c2w' or 'w2c', got {mode!r}")
+
+    def get_se3(self, degrees: bool = True) -> np.ndarray:
+        from view_suite.scannet.utils.pose_utils import c2w_extrinsic_to_se3
+        return c2w_extrinsic_to_se3(self.get_pose(mode="c2w"), degrees=degrees)
+
+    def set_se3(self, pose6, degrees: bool = True) -> None:
+        from view_suite.ai2thor.pose_utils import c2w_to_unity_pose
+        from view_suite.scannet.utils.pose_utils import c2w_se3_to_extrinsic
+        c2w = c2w_se3_to_extrinsic(np.asarray(pose6, dtype=np.float64),
+                                    degrees=degrees)
+        self.set_pose_thor(c2w_to_unity_pose(c2w))
 
     # ---------------- movement ----------------
     def move_forward(self, d):
@@ -171,7 +213,10 @@ class ViewManipulator:
         self.pos += right * float(d)
 
     def move_up(self, d):
-        _, up, _ = self._basis()
+        if self.ground_plane_movement:
+            up = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+        else:
+            _, up, _ = self._basis()
         self.pos += up * float(d)
 
     # ---------------- rotation ----------------
@@ -248,12 +293,17 @@ def _ensure_dir(p):
 
 
 def _save_rgb(rgb, path):
+    import cv2
+
     # rgb: HxWx3 uint8 RGB
     bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
     cv2.imwrite(path, bgr)
 
 
 def main():
+    from ai2thor.controller import Controller
+    from ai2thor.platform import CloudRendering
+
     out_dir = "thor_vm_test_" + datetime.now().strftime("%Y%m%d_%H%M%S")
     _ensure_dir(out_dir)
 

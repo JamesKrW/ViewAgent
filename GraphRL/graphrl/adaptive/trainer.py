@@ -146,6 +146,16 @@ class AdaptivePPOTrainer(VagenPPOTrainer):
 
     def _validate(self):
         metrics = super()._validate()
+
+        # ★ Only the resume reconciliation is first-validation work. Everything
+        # below it runs on every scheduled validation, and an earlier revision that
+        # nested the whole body under this branch made the controller inert: it
+        # observed step 0 and nothing after, so patience never accumulated, no
+        # round-best was ever recorded past the first, and neither the SFT switch
+        # nor the early stop could fire. The run just trained to the step budget.
+        # It is silent from the outside -- the only tell is that
+        # `[AdaptiveSchedule] patience reset` never appears in the log, and
+        # `last_observed_step` stays at 0 in the state file.
         if self._adaptive_first_validation:
             self._adaptive_first_validation = False
             self._run_schedule.reconcile_resume(self.global_steps)
@@ -157,23 +167,24 @@ class AdaptivePPOTrainer(VagenPPOTrainer):
                     f"step {self.global_steps}; patience state unchanged"
                 )
                 return metrics
-            decision = self._run_schedule.observe(
-                val_metrics=metrics, global_steps=self.global_steps
+
+        decision = self._run_schedule.observe(
+            val_metrics=metrics, global_steps=self.global_steps
+        )
+        if decision.get("is_best"):
+            self._run_schedule.save_best_checkpoint(
+                actor_rollout_wg=self.actor_rollout_wg,
+                global_steps=self.global_steps,
+                score=decision["score"],
             )
-            if decision.get("is_best"):
-                self._run_schedule.save_best_checkpoint(
-                    actor_rollout_wg=self.actor_rollout_wg,
-                    global_steps=self.global_steps,
-                    score=decision["score"],
-                )
-            if decision.get("stop_run") or decision.get("switch_to_sft"):
-                # ``is_last_step`` is an attribute on SeparateRayPPOTrainer, not a
-                # local as it was in the older loop, so setting it here is enough:
-                # fit_step runs _fit_validate before _fit_save_checkpoint and exits
-                # on it at the end of this same step, epilogue included. The older
-                # backend needed a `_schedule_stop` flag patched into verl's fit()
-                # to achieve the same thing.
-                self.is_last_step = True
+        if decision.get("stop_run") or decision.get("switch_to_sft"):
+            # ``is_last_step`` is an attribute on SeparateRayPPOTrainer, not a
+            # local as it was in the older loop, so setting it here is enough:
+            # fit_step runs _fit_validate before _fit_save_checkpoint and exits
+            # on it at the end of this same step, epilogue included. The older
+            # backend needed a `_schedule_stop` flag patched into verl's fit()
+            # to achieve the same thing.
+            self.is_last_step = True
         return metrics
 
     def _vagen_dump_images(self, batch) -> None:

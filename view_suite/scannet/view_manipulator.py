@@ -14,7 +14,11 @@ from view_suite.scannet.utils.pose_utils import (
 class ViewManipulator:
     """
     Camera pose controller that keeps the canonical state as camera-to-world (c2w).
-    Movement is along the camera's own axes (no ground projection).
+    By default movement is along the camera's own axes.  Setting
+    ``ground_plane_movement=True`` switches to Habitat-style body movement:
+    forward/backward and strafing stay horizontal, up/down follow world-up,
+    and yaw is about world-up.  Pitch therefore changes only where the camera
+    looks, never where a subsequent horizontal move goes.
 
     Movement:
       - Forward/backward: along camera +Z (into the screen for your stack).
@@ -22,7 +26,7 @@ class ViewManipulator:
       - Screen up/down:   along camera ±Y (sign depends on image_y_down).
 
     Rotation:
-      - Yaw:   rotate around WORLD up axis (pre-multiply in c2w).
+      - Yaw: camera-local Y in legacy mode; WORLD up in ground-plane mode.
       - Pitch: rotate around LOCAL camera right X (post-multiply in c2w).
 
     Discrete mode:
@@ -43,6 +47,7 @@ class ViewManipulator:
         is_discrete: bool = False,
         is_snap_every_step: bool = True,
         image_y_down: bool = True,
+        ground_plane_movement: bool = False,
     ):
         """
         Args:
@@ -54,6 +59,8 @@ class ViewManipulator:
                 step_rotation_deg after every rotation (Euler quantization).
                 Only effective when is_discrete=True.
             image_y_down: if True, screen-up = camera (0,-1,0); else (0,+1,0).
+            ground_plane_movement: use yaw-only, ground-parallel body movement;
+                move up/down along the configured world-up axis.
         """
         self.step_t = float(step_translation)
         self.step_r_deg = float(step_rotation_deg)
@@ -63,6 +70,7 @@ class ViewManipulator:
         self.is_discrete = bool(is_discrete)
         self.is_snap_every_step = bool(is_snap_every_step) and self.is_discrete
         self.image_y_down = bool(image_y_down)
+        self.ground_plane_movement = bool(ground_plane_movement)
 
         # Canonical pose: camera-to-world
         self.c2w = np.eye(4, dtype=np.float64)
@@ -129,18 +137,24 @@ class ViewManipulator:
 
 
     # -------------------------------------------------------------------------
-    # Movements (no ground projection) in WORLD via c2w
+    # Movements in WORLD via c2w
     # -------------------------------------------------------------------------
     def move_forward(self, distance: float):
-        """Translate along camera +Z by `distance` (world = c2w[:3,:3] @ [0,0,1])."""
+        """Move along camera +Z, projected to the ground when configured."""
         R_c2w, C_world = self._Rc_t_from_c2w(self.c2w)
-        dir_world = R_c2w @ np.array([0.0, 0.0, 1.0])  # camera +Z in world
+        if self.ground_plane_movement:
+            _, dir_world = self._ground_basis(R_c2w)
+        else:
+            dir_world = R_c2w @ np.array([0.0, 0.0, 1.0])
         self._translate_camera_center(C_world, R_c2w, dir_world * distance)
 
     def move_right(self, distance: float):
-        """Translate along screen-right (camera +X) by `distance`."""
+        """Move screen-right, projected to the ground when configured."""
         R_c2w, C_world = self._Rc_t_from_c2w(self.c2w)
-        dir_world = R_c2w @ np.array([1.0, 0.0, 0.0])  # camera +X in world
+        if self.ground_plane_movement:
+            dir_world, _ = self._ground_basis(R_c2w)
+        else:
+            dir_world = R_c2w @ np.array([1.0, 0.0, 0.0])
         self._translate_camera_center(C_world, R_c2w, dir_world * distance)
 
     def move_screen_up(self, distance: float):
@@ -150,8 +164,12 @@ class ViewManipulator:
         otherwise screen-up = camera (0,+1,0).
         """
         R_c2w, C_world = self._Rc_t_from_c2w(self.c2w)
-        cam_up = np.array([0.0, -1.0, 0.0]) if self.image_y_down else np.array([0.0, 1.0, 0.0])
-        dir_world = R_c2w @ cam_up
+        if self.ground_plane_movement:
+            dir_world = self._world_up_vector()
+        else:
+            cam_up = (np.array([0.0, -1.0, 0.0]) if self.image_y_down
+                      else np.array([0.0, 1.0, 0.0]))
+            dir_world = R_c2w @ cam_up
         self._translate_camera_center(C_world, R_c2w, dir_world * distance)
 
     # -------------------------------------------------------------------------
@@ -159,12 +177,19 @@ class ViewManipulator:
     # -------------------------------------------------------------------------
     def yaw_camera(self, angle_rad: float):
         """
-        Yaw around the camera's local +Y axis by angle_rad, about the camera center.
-        Implemented in c2w as: R_c2w' = R_c2w @ R_y(angle).
+        Yaw about camera-local +Y in legacy mode or world-up in ground mode.
         """
         R_c2w, C_world = self._Rc_t_from_c2w(self.c2w)
-        R_local = R.from_euler("y", angle_rad, degrees=False).as_matrix()
-        R_new = R_c2w @ R_local
+        if self.ground_plane_movement:
+            # ``step('q')`` supplies a negative local-Y angle for turn-left.
+            # OpenCV cameras have image +Y down, so their physical up is -Y;
+            # reverse that sign when expressing the turn about world-up.
+            world_angle = -angle_rad if self.image_y_down else angle_rad
+            R_world = R.from_rotvec(self._world_up_vector() * world_angle).as_matrix()
+            R_new = R_world @ R_c2w
+        else:
+            R_local = R.from_euler("y", angle_rad, degrees=False).as_matrix()
+            R_new = R_c2w @ R_local
         if self.is_snap_every_step:
             R_new = self._snap_rotation_matrix_c2w(R_new)
         self.c2w = self._compose_c2w(R_new, C_world)
@@ -245,6 +270,41 @@ class ViewManipulator:
     # -------------------------------------------------------------------------
     # Internal helpers (c2w)
     # -------------------------------------------------------------------------
+    def _world_up_vector(self) -> np.ndarray:
+        if self.up_axis == "Z":
+            return np.array([0.0, 0.0, 1.0], dtype=np.float64)
+        return np.array([0.0, 1.0, 0.0], dtype=np.float64)
+
+    def _ground_basis(self, R_c2w: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Return unit (right, forward) vectors in the horizontal plane.
+
+        Camera forward is projected first, which removes pitch.  The right
+        vector is reconstructed from world-up, which also removes roll.  At a
+        straight-up/down singularity, projected camera-right provides a stable
+        fallback heading.
+        """
+        up = self._world_up_vector()
+        raw_forward = R_c2w @ np.array([0.0, 0.0, 1.0])
+        forward = raw_forward - up * float(np.dot(raw_forward, up))
+        norm_forward = float(np.linalg.norm(forward))
+        if norm_forward > 1e-10:
+            forward /= norm_forward
+            right = (np.cross(forward, up) if self.image_y_down
+                     else np.cross(up, forward))
+            right /= np.linalg.norm(right)
+            return right, forward
+
+        raw_right = R_c2w @ np.array([1.0, 0.0, 0.0])
+        right = raw_right - up * float(np.dot(raw_right, up))
+        norm_right = float(np.linalg.norm(right))
+        if norm_right <= 1e-10:
+            raise ValueError("camera forward and right are both parallel to world-up")
+        right /= norm_right
+        forward = (np.cross(up, right) if self.image_y_down
+                   else np.cross(right, up))
+        forward /= np.linalg.norm(forward)
+        return right, forward
+
     @staticmethod
     def _Rc_t_from_c2w(M: np.ndarray):
         """Extract (R_c2w, C_world) from a 4x4 c2w matrix."""

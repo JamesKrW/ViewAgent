@@ -20,6 +20,10 @@ from graphrl.adaptive.state import (
 from graphrl.vagen.adaptive_vagen_wrapper import AdaptiveVagenWrapper
 from graphrl.adaptive.trainer import AdaptivePPOTrainer
 from vagen.training.trainer.ppo_trainer import VagenPPOTrainer
+from graphrl.adaptive.rollouts import (
+    durable_rollout_prefix,
+    rollout_step_is_complete,
+)
 from graphrl.adaptive.schedule import AdaptiveSchedule
 
 METRIC = "val-aux/ae/traj_success/mean@1"
@@ -536,3 +540,72 @@ def test_tracker_accepts_latched_checkpoint_without_rollout_images(tmp_path):
     trainer._repair_adaptive_checkpoint_tracker()
 
     assert tracker.read_text(encoding="utf-8") == "20"
+
+
+
+def test_rollout_step_requires_frames_without_completion_marker(tmp_path):
+    (tmp_path / "1.jsonl").write_text('{"a": 1}\n', encoding="utf-8")
+    assert not rollout_step_is_complete(tmp_path, 1)
+
+    image_dir = tmp_path / "image_1" / "images_0"
+    image_dir.mkdir(parents=True)
+    (image_dir / "0.png").write_bytes(b"png")
+    assert rollout_step_is_complete(tmp_path, 1)
+    assert durable_rollout_prefix(tmp_path) == 1
+
+
+def test_empty_jsonl_is_not_complete(tmp_path):
+    (tmp_path / "1.jsonl").write_text("", encoding="utf-8")
+    assert not rollout_step_is_complete(tmp_path, 1)
+
+
+def test_marker_still_overrides_where_one_exists(tmp_path):
+    """A SLIME-era directory keeps the stronger guarantee."""
+    (tmp_path / "1.jsonl").write_text('{"a": 1}\n', encoding="utf-8")
+    (tmp_path / "1.complete").write_text("partial", encoding="utf-8")
+    assert not rollout_step_is_complete(tmp_path, 1)
+    (tmp_path / "1.complete").write_text("complete", encoding="utf-8")
+    assert rollout_step_is_complete(tmp_path, 1)
+
+
+class _RecordingSchedule:
+    """Counts observations; everything else is the minimum _validate touches."""
+
+    def __init__(self):
+        self.observed_steps = []
+
+    def reconcile_resume(self, step):
+        pass
+
+    def should_observe_resume_validation(self, step):
+        return True
+
+    def observe(self, val_metrics, global_steps):
+        self.observed_steps.append(int(global_steps))
+        return {}
+
+
+def test_every_scheduled_validation_is_observed():
+    """Observing only the first validation makes the whole controller inert.
+
+    Patience never accumulates, no round-best is recorded past step 0, and
+    neither the SFT switch nor the early stop can ever fire -- the run simply
+    trains to the step budget with no sign anything is wrong.
+    """
+    trainer = object.__new__(AdaptivePPOTrainer)
+    trainer._run_schedule = _RecordingSchedule()
+    trainer._adaptive_first_validation = True
+
+    # Bypass VagenPPOTrainer._validate, which needs a live worker group.
+    import graphrl.adaptive.trainer as mod
+
+    original = mod.VagenPPOTrainer._validate
+    mod.VagenPPOTrainer._validate = lambda self: {}
+    try:
+        for step in (0, 20, 40, 60):
+            trainer.global_steps = step
+            AdaptivePPOTrainer._validate(trainer)
+    finally:
+        mod.VagenPPOTrainer._validate = original
+
+    assert trainer._run_schedule.observed_steps == [0, 20, 40, 60]

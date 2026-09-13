@@ -305,7 +305,18 @@ class AdaptiveGraphRLController(GraphRLController):
         trainer["test_freq"] = self.adaptive_config["eval_every_steps"]
         trainer["save_freq"] = self.adaptive_config["eval_every_steps"]
         trainer["val_before_train"] = True
-        trainer["save_best_val"] = False
+        # The schedule owns best-checkpoint selection: AdaptiveSchedule.observe
+        # decides, save_best_checkpoint writes, and the snapshot it writes is what
+        # the controller hands to the next round. The trainer keeping its own "best"
+        # in parallel would select on a different metric and leave two answers to
+        # the same question.
+        #
+        # Named save_best_val on the previous backend. This one calls it
+        # save_best_actor and defaults it to True, so the rename was not inert:
+        # Hydra rejects the unknown key outright ("Could not override
+        # 'trainer.save_best_val'"), which is how it surfaced -- at the first
+        # adaptive round, after the job had staged data and passed preflight.
+        trainer["save_best_actor"] = False
         hydra_overrides["trainer"] = trainer
         rl_override["hydra_overrides"] = hydra_overrides
         iter_config["rl"] = rl_override

@@ -52,6 +52,12 @@ general_overrides:
       actor_rollout_ref:
         actor:
           ppo_mini_batch_size: 128
+          # ★ 2, which is what this experiment originally ran under -- not the 1 in
+          # VAGEN's baseline_vllm.flags. An earlier revision deleted these overrides
+          # to survive an OOM, but that OOM came from the memory saver being off; with
+          # it back on, sglang returns its reservation for the training phase and 2
+          # fits. It matters: at 1 the four training phases (old_log_prob, values,
+          # update_critic, update_actor) were 64% of a 115 s step.
           ppo_micro_batch_size_per_gpu: 2
           checkpoint:
             # CheckpointMonitor promotes <ckpt>/actor/huggingface into rl_model/,
@@ -60,22 +66,38 @@ general_overrides:
         rollout:
           n: 1
           tensor_model_parallel_size: 1
-          # Low: free_cache_engine is off on this host (see
-          # vagen_configs/config.yaml), so the engine holds this for the
-          # whole iteration, not just during rollout.
-          gpu_memory_utilization: 0.4
+          log_prob_micro_batch_size_per_gpu: 2
+          # The value this experiment originally ran under. It is only affordable
+          # because the memory saver is on (see vagen_configs/config.yaml):
+          # sglang hands the reservation back for the training phase, so it is not
+          # subtracted from the actor+critic budget.
+          gpu_memory_utilization: 0.6
           max_num_batched_tokens: 32768
           enforce_eager: true
-          enable_chunked_prefill: true
-          log_prob_micro_batch_size_per_gpu: 2
+          # ★ The rest of the original rollout block, restored together with the
+          # memory saver. Enabling the saver without these is what produced the
+          # KeyError: 'weights' that was previously read as the saver being broken.
+          mode: async
+          engine_kwargs:
+            sglang:
+              # The original block named flashinfer. It cannot be used here: the
+              # packaged conda env ships no CUDA headers, so flashinfer's JIT dies
+              # compiling its prefill kernel --
+              #   cutlass/util/reference/device/tensor_fill.h:52:10:
+              #   fatal error: curand_kernel.h: No such file or directory
+              # taking the sglang scheduler with it. triton needs no nvcc at run
+              # time and matches the mm backend already in use. Nothing about the
+              # memory saver depends on this choice.
+              attention_backend: triton
+              mm_attention_backend: triton_attn
         ref:
           log_prob_micro_batch_size_per_gpu: 2
       critic:
+        ppo_micro_batch_size_per_gpu: 2
         # Deliberately not in baseline_vllm.flags: `need_critic` short-circuits on
         # it, so setting it there would build and train a critic for the GRPO
         # scripts too. A PPO experiment sets it itself.
         enable: true
-        ppo_micro_batch_size_per_gpu: 2
       trainer:
         harness: concat
         n_gpus_per_node: 8
@@ -83,6 +105,10 @@ general_overrides:
         save_freq: 20
         test_freq: 20
         log_val_generations: 32
+        # TrajToSFT consumes the observations paired with each saved rollout.
+        # Adaptive training stops this capture automatically after latching.
+        log_image:
+          enable: true
 
   traj_to_sft:
     module: graphrl.envs.viewsuite.viewsuite_interactive_view_planning.InteractiveViewPlanningTrajToSFT
@@ -90,7 +116,7 @@ general_overrides:
     # this dir. For Habitat-GS this points at the generated dataset root; the full
     # distillation path may need per-generator path adaptation (the RL-only smoke
     # does not exercise it).
-    viewsuite_15k_dir: ${oc.env:VIEWSUITE_ROOT}/data/habitat_gs
+    viewsuite_15k_dir: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_habitat_gs
     graph_builder:
       num_workers: 4
       filter:
@@ -104,8 +130,9 @@ general_overrides:
         # frame, and ending up further from the target than not moving at all.
         enabled: true
         corpus: habitat_gs
+        ground_plane_movement: false
         client_url: null       # null -> $VIEWSUITE_ROOT/client_url_habitat_gs.txt
-        corpus_dir: ${oc.env:VIEWSUITE_ROOT}/data/habitat_gs
+        corpus_dir: ${oc.env:VIEWSUITE_ROOT}/data/viewagent15k_habitat_gs
         step_translation: 0.5
         # Habitat-GS scales the step per scene (0.25-8 m); corpus_dir supplies the
         # real value per scene and this global is only the fallback.

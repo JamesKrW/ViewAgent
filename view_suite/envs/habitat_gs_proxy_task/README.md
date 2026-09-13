@@ -17,16 +17,17 @@ service at eval time. **IVP renders every turn** and needs the render service be
 
 ## What differs from the other two worlds
 
-**The action space is Habitat's, not ours.** Habitat splits a yaw-only *body* from a
-pitching *sensor*, so turning is ground-parallel and forward motion is horizontal
-however far the camera is tilted; there is no roll action. The ScanNet manipulator yaws
-about the camera's own +Y instead, which tilts once pitched. Neither is more correct —
-this one follows the simulator it runs on, which also makes the two action spaces a
-clean A/B for the same eval.
+Habitat splits a yaw-only *body* from a pitching *sensor*, so turning is
+ground-parallel and forward motion is horizontal however far the camera is tilted;
+there is no roll action. This behavior is now available consistently in all three
+proxy environments as `ground_plane_movement: true` (`ground_plane_v1`). In that mode,
+up/down are also normalized to world +Y/-Y instead of the native viewer's sensor-local
+Y. See `view_suite/envs/GROUND_PLANE_ACTION_SPACE.md` for the exact shared semantics.
 
-`HabitatGSViewManipulator` drives **both** data generation and the IVP env. Worth saying
-explicitly: the AI2-THOR generator and its env use different manipulators and disagree
-silently once pitch is non-zero.
+`HabitatGSViewManipulator` drives data generation, IVP, and view-graph atomization.
+The AI2-THOR runtime likewise now uses the same manipulator as its generator, so a
+pitched trajectory no longer acquires a different target depending on where it is
+replayed.
 
 **The translation step is per-scene.** The corpus spans an order of magnitude of scale —
 `interior_*` rooms have a ~23 m navmesh diagonal, the `sceneNN` scenes (many outdoor) a
@@ -46,9 +47,10 @@ still looks correct. This is the failure mode the AI2-THOR pair has, and it bit 
 too — before the fix, 265 of 288 test samples were told a 0.5 m step the data did not
 use.
 
-One thing to know before tuning the pitch limit: pitch snaps to multiples of the
-rotation step, so at the default 30° step a limit of 40 and a limit of 45 both cap at
-30. Only multiples of the step are reachable.
+One thing to know before tuning the pitch limit: with the default
+`is_snap_every_step: true`, pitch snaps to multiples of the rotation step, so at the
+default 30° step a limit of 40 and a limit of 45 both cap at 30. Set the knob to
+`false` when those intermediate angles should remain reachable.
 
 ## Data
 
@@ -66,7 +68,8 @@ bash scripts/habitat_gs/download_habitat_gs_service_data.sh
 # 2. generate. Resumable: a scene with a .done marker is skipped.
 ~/miniconda3/envs/habitat-gs/bin/python -m \
   view_suite.envs.habitat_gs_proxy_task.data_gen.gen_parallel \
-  --out_root=$VIEWSUITE_ROOT/data/viewagent15k_habitat_gs --scenes=all --samples_per_scene=24 --n_gpus=8
+  --out_root=$VIEWSUITE_ROOT/data/viewagent15k_habitat_gs_ground_plane --scenes=all \
+  --samples_per_scene=24 --n_gpus=8 --ground_plane_movement=true
 
 # 3. screen every view with a VLM judge. --backend=openrouter needs OPENROUTER_API;
 #    --backend=cli shells out to whatever VIEW_JUDGE_CMD names, for sites where a
@@ -210,7 +213,8 @@ ScanNet backend) cannot share an interpreter. See `../../habitat_gs/habitat_gs_r
 for the build, and run `view_suite/habitat_gs/tests/sanity_render.py` on any new machine
 **before** anything else: a stage that fails to load still returns frames.
 
-Measured, 8×H200, 512×512, otherwise idle:
+Measured on 8 GPUs, 512×512, otherwise idle (absolute numbers are
+host-dependent; the ratios are what transfer):
 
 | | |
 |---|---|

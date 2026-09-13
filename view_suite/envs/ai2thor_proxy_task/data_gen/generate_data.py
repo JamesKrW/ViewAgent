@@ -87,6 +87,9 @@ class GenConfig:
     fov: float = 90.0
     step_translation: float = 0.5           # meters
     step_rotation_deg: float = 30.0         # degrees
+    # False reproduces the released corpus. True is the new unified action
+    # space: horizontal moves use yaw only and vertical moves use world Y.
+    ground_plane_movement: bool = False
     gt_seq_min: int = 2
     gt_seq_max: int = 6
     num_distractors: int = 3
@@ -147,12 +150,19 @@ def _seq_equal(a: List[str], b: List[str]) -> bool:
     return len(a) == len(b) and all(x == y for x, y in zip(a, b))
 
 
-def _apply_sequence(init_pose: Dict, seq: List[str], step_t: float, step_r: float) -> Dict:
+def _apply_sequence(
+    init_pose: Dict,
+    seq: List[str],
+    step_t: float,
+    step_r: float,
+    ground_plane_movement: bool = False,
+) -> Dict:
     vm = ViewManipulator(
         init_pose=init_pose,
         step_translation=step_t,
         step_rotation_deg=step_r,
         is_discrete=True,
+        ground_plane_movement=ground_plane_movement,
     )
     for a in seq:
         vm.step(a)
@@ -326,11 +336,30 @@ def _save_png(img: np.ndarray, path: str) -> None:
 # =============================================================================
 # Prompt builders  (match scannet jsonl text so prompts work with existing envs)
 # =============================================================================
-def _build_forward_prompt(step_t: float, step_r: float, action_seq_names: List[str]) -> str:
+def _movement_prompt(ground_plane_movement: bool) -> str:
+    if ground_plane_movement:
+        return (
+            "Movement mode = ground_plane_v1: forward/backward and left/right use yaw "
+            "only on the horizontal world XZ plane; up/down use world +Y/-Y; "
+            "look up/down changes pitch only."
+        )
+    return (
+        "Movement mode = legacy_v1 (camera-local): translations follow the camera axes, so "
+        "looking up/down changes the vertical component of later movement."
+    )
+
+
+def _build_forward_prompt(
+    step_t: float,
+    step_r: float,
+    action_seq_names: List[str],
+    ground_plane_movement: bool = False,
+) -> str:
     return (
         f"Given the initial view <image> and a top-down reference <image>, "
         f"after you execute the following action sequence "
         f"(translation step = {step_t} m; rotation step = {step_r} degrees per step):\n"
+        f"{_movement_prompt(ground_plane_movement)}\n"
         f"[{', '.join(action_seq_names)}]\n"
         f"which of the following images corresponds to the result?\n"
         f"A. <image>\nB. <image>\nC. <image>\nD. <image>\n"
@@ -338,23 +367,26 @@ def _build_forward_prompt(step_t: float, step_r: float, action_seq_names: List[s
 
 
 def _build_inverse_prompt(step_t: float, step_r: float,
-                          option_action_seq_names: Dict[str, List[str]]) -> str:
+                          option_action_seq_names: Dict[str, List[str]],
+                          ground_plane_movement: bool = False) -> str:
     lines = [
         "Given the initial view <image> and a top-down reference <image>, "
         "which action sequence will reach the target view <image>?",
         f"(Action semantics: translation step = {step_t} m; rotation step = {step_r} degrees per step.)",
+        _movement_prompt(ground_plane_movement),
     ]
     for letter in ["A", "B", "C", "D"]:
         lines.append(f"{letter}. [{', '.join(option_action_seq_names[letter])}]")
     return "\n".join(lines) + "\n"
 
 
-def _build_active_explore_prompt() -> str:
+def _build_active_explore_prompt(ground_plane_movement: bool = False) -> str:
     # active_exploration prompt is typically inlined by the env class itself; we
     # still produce a sensible prompt string so the jsonl row is self-describing.
     return (
         "Given the initial view <image> and a top-down reference <image>, "
-        "estimate the target view's 6-DoF pose relative to the world."
+        "estimate the target view's 6-DoF pose relative to the world. "
+        + _movement_prompt(ground_plane_movement)
     )
 
 
@@ -388,7 +420,10 @@ def _build_sample(
     for _ in range(cfg.max_resample_tries):
         gt_len = rng.randint(cfg.gt_seq_min, cfg.gt_seq_max)
         seq = _sample_action_seq(rng, gt_len)
-        pose = _apply_sequence(init_pose, seq, cfg.step_translation, cfg.step_rotation_deg)
+        pose = _apply_sequence(
+            init_pose, seq, cfg.step_translation, cfg.step_rotation_deg,
+            cfg.ground_plane_movement,
+        )
         if not _valid_option_pose(pose, reachable_xz, cfg):
             continue
         # reject degenerate targets: init already within success threshold of target
@@ -409,7 +444,10 @@ def _build_sample(
         seq = _sample_action_seq(rng, dl)
         if _seq_equal(seq, gt_seq) or any(_seq_equal(seq, d) for d in distractors):
             continue
-        pose = _apply_sequence(init_pose, seq, cfg.step_translation, cfg.step_rotation_deg)
+        pose = _apply_sequence(
+            init_pose, seq, cfg.step_translation, cfg.step_rotation_deg,
+            cfg.ground_plane_movement,
+        )
         if not _valid_option_pose(pose, reachable_xz, cfg):
             continue
         distractors.append(seq)
@@ -498,6 +536,11 @@ def _build_sample(
         "gt_action_seq_names": [ACTION_NAMES.get(a, a) for a in gt_seq],
         "step_translation_m": cfg.step_translation,
         "step_rotation_deg": cfg.step_rotation_deg,
+        "ground_plane_movement": cfg.ground_plane_movement,
+        "action_space_version": (
+            "ground_plane_v1" if cfg.ground_plane_movement else "legacy_v1"
+        ),
+        "world_up_axis": "Y",
         "source": "ai2thor",
     }
     with open(os.path.join(sample_dir_abs, "meta.json"), "w") as f:
@@ -521,7 +564,8 @@ def _build_sample(
         "scene_id": scene_id,
         "sample_id": meta["sample_id"],
         "prompt": _build_forward_prompt(
-            cfg.step_translation, cfg.step_rotation_deg, meta["gt_action_seq_names"]
+            cfg.step_translation, cfg.step_rotation_deg, meta["gt_action_seq_names"],
+            cfg.ground_plane_movement,
         ),
         "image_path": [init_path_rel, top_down_path_rel] + [
             f"{scene_id}/sample_{sample_idx:03d}/option_{i:03d}.png" for i in range(4)
@@ -542,6 +586,9 @@ def _build_sample(
         "meta": {
             "step_translation_m": cfg.step_translation,
             "step_rotation_deg": cfg.step_rotation_deg,
+            "ground_plane_movement": cfg.ground_plane_movement,
+            "action_space_version": meta["action_space_version"],
+            "world_up_axis": "Y",
             "gt_label": gt_answer_letter,
             "gt_action_seq_letters": meta["gt_action_seq_letters"],
             "gt_action_seq_names":   meta["gt_action_seq_names"],
@@ -555,7 +602,8 @@ def _build_sample(
         "scene_id": scene_id,
         "sample_id": meta["sample_id"],
         "prompt": _build_inverse_prompt(
-            cfg.step_translation, cfg.step_rotation_deg, option_action_seqs_names
+            cfg.step_translation, cfg.step_rotation_deg, option_action_seqs_names,
+            cfg.ground_plane_movement,
         ),
         "image_path": [init_path_rel, top_down_path_rel, target_path_rel],
         "image_detail": {
@@ -572,6 +620,9 @@ def _build_sample(
             "used_only_gt": True,
             "step_translation_m": cfg.step_translation,
             "step_rotation_deg": cfg.step_rotation_deg,
+            "ground_plane_movement": cfg.ground_plane_movement,
+            "action_space_version": meta["action_space_version"],
+            "world_up_axis": "Y",
             "gt_label": gt_answer_letter,
             "gt_action_seq_letters": meta["gt_action_seq_letters"],
             "gt_action_seq_names":   meta["gt_action_seq_names"],
@@ -584,7 +635,7 @@ def _build_sample(
     active_explore_row = {
         "scene_id": scene_id,
         "sample_id": meta["sample_id"],
-        "prompt": _build_active_explore_prompt(),
+        "prompt": _build_active_explore_prompt(cfg.ground_plane_movement),
         "image_path": [init_path_rel, top_down_path_rel, target_path_rel],
         "image_detail": {
             "init_view":     _detail_view(init_path_rel, init_pose),
@@ -602,6 +653,9 @@ def _build_sample(
         "meta": {
             "step_translation_m": cfg.step_translation,
             "step_rotation_deg": cfg.step_rotation_deg,
+            "ground_plane_movement": cfg.ground_plane_movement,
+            "action_space_version": meta["action_space_version"],
+            "world_up_axis": "Y",
             "gt_action_seq_letters": meta["gt_action_seq_letters"],
             "gt_action_seq_names":   meta["gt_action_seq_names"],
         },
@@ -627,6 +681,7 @@ def run(
     fov: float = GenConfig.fov,
     step_translation: float = GenConfig.step_translation,
     step_rotation_deg: float = GenConfig.step_rotation_deg,
+    ground_plane_movement: bool = GenConfig.ground_plane_movement,
     seed: int = GenConfig.seed,
     gt_seq_min: int = GenConfig.gt_seq_min,
     gt_seq_max: int = GenConfig.gt_seq_max,
@@ -645,6 +700,7 @@ def run(
         out_root=out_root, scenes=scenes, samples_per_scene=samples_per_scene,
         width=width, height=height, fov=fov,
         step_translation=step_translation, step_rotation_deg=step_rotation_deg,
+        ground_plane_movement=ground_plane_movement,
         seed=seed, gt_seq_min=gt_seq_min, gt_seq_max=gt_seq_max,
         top_down_height_y=top_down_height_y,
         inside_room_threshold_m=inside_room_threshold_m,
